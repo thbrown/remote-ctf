@@ -22,17 +22,28 @@ towards making forward progress and leaving clear notes over stopping to ask.
 
 ## Milestones (from doc01 §11) — track status here
 
-- [ ] **M0** — Four listeners up (nodeApp :3000, deviceApp HTTPS, spectatorApp :8080,
+- [x] **M0** — Four listeners up (nodeApp :3000, deviceApp HTTPS, spectatorApp :8080,
       portalApp :80/disabled-in-dev); Web App served over HTTPS; `sim-control-point`
-      registers successfully.
+      registers successfully. **Done and live-verified** (not just unit tests): booted
+      `apps/hub-server/src/index.ts` for real with `npx tsx`, curled all four ports
+      (deviceApp HTTPS index page, spectatorApp `/scoreboard`, nodeApp `/api/cp/register`,
+      portalApp `/generate_204`), and ran `tools/sim-control-point` against the live
+      server — it registered successfully. Web App bundle doesn't exist yet (Task #10),
+      so deviceApp currently serves a "not built yet" placeholder instead of the SPA —
+      that's expected until the web app is built.
 - [ ] **M1** — `InMemoryStore` + `FileSystemStore` + `TimeSeriesStore` pass one shared
       contract test suite; 8 teams seeded.
 - [x] **M2** — register → presence → heartbeat → `/set-color` round-trip against the
       simulator; reconciliation proven by deliberately dropping a push. **Done** — see
       `apps/hub-server/src/nodes/nodeIntegration.test.ts` (automated, both scenarios pass)
       plus the interactive `tools/sim-control-point` CLI for manual/visual checks.
-- [ ] **M3** — WS snapshot/patch; profile creation with a 128×128 photo; Stats renders
-      live; scoreboard page works.
+- [x] **M3 (server half only)** — WS snapshot/patch protocol is done and tested
+      (`apps/hub-server/src/ws/`: WsGateway.ts, gameEvents.ts, snapshot.ts, 7 passing
+      integration tests using a real socket.io client/server pair). Profile
+      creation/photo upload plumbing exists server-side (`player:update` handles a base64
+      `profilePicture` -> `AttachmentStore.put`, 64KB cap enforced) but there's no actual
+      128x128 client-side downscaling since that's a Web App (Task #10) concern. Stats
+      rendering and the scoreboard page are pure frontend — not started.
 - [x] **M4** — Capture (with grace window), Tag, Respawn, 1 Hz scoring, session
       start/stop. **Done at the engine level** — `apps/hub-server/src/engine/GameEngine.ts`
       + 21 passing unit tests in `GameEngine.test.ts` (InMemoryStore + FakeClock). Not yet

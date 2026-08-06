@@ -15,11 +15,13 @@
     "express": "4.19.2",
     "socket.io": "4.7.5",
     "zod": "3.23.8",
-    "selfsigned": "2.4.1"
+    "selfsigned": "2.4.1",
+    "qrcode": "1.5.3"
   },
   "devDependencies": {
     "@types/express": "4.17.21",
     "@types/node": "20.14.2",
+    "@types/qrcode": "1.5.5",
     "socket.io-client": "4.7.5",
     "typescript": "5.4.5",
     "tsx": "4.15.6",

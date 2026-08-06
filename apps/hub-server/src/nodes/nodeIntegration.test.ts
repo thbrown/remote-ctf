@@ -20,6 +20,8 @@ const config: Config = {
   deviceHttpsPort: 8443,
   spectatorHttpPort: 8080,
   portalHttpPort: null,
+  wifiSsid: 'FoundryCTF',
+  wifiPsk: 'capturetheflag',
   tlsMode: 'selfsigned',
   tlsCertPath: null,
   tlsKeyPath: null,

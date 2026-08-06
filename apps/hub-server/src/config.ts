@@ -19,6 +19,10 @@ export interface Config {
   spectatorHttpPort: number;
   /** doc01 §9.2: "disabled" in dev. null means the portal app does not bind. */
   portalHttpPort: number | null;
+  /** doc00 Q-A / doc00 §0.2 — TBD until the venue is finalized; using the doc's own
+   * proposed defaults (PROGRESS.md documents this choice). */
+  wifiSsid: string;
+  wifiPsk: string;
   tlsMode: TlsMode;
   tlsCertPath: string | null;
   tlsKeyPath: string | null;
@@ -82,6 +86,8 @@ export async function loadConfig(): Promise<Config> {
     deviceHttpsPort: envInt('DEVICE_HTTPS_PORT', isDev ? 8443 : 443),
     spectatorHttpPort: envInt('SPECTATOR_HTTP_PORT', 8080),
     portalHttpPort,
+    wifiSsid: envStr('WIFI_SSID', 'FoundryCTF'),
+    wifiPsk: envStr('WIFI_PSK', 'capturetheflag'),
     tlsMode: (envStr('TLS_MODE', 'selfsigned') as TlsMode) ?? 'selfsigned',
     tlsCertPath: process.env.TLS_CERT_PATH ?? null,
     tlsKeyPath: process.env.TLS_KEY_PATH ?? null,

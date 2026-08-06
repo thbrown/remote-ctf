@@ -20,6 +20,9 @@ importers:
       express:
         specifier: 4.19.2
         version: 4.19.2
+      qrcode:
+        specifier: 1.5.3
+        version: 1.5.3
       selfsigned:
         specifier: 2.4.1
         version: 2.4.1
@@ -36,6 +39,9 @@ importers:
       '@types/node':
         specifier: 20.14.2
         version: 20.14.2
+      '@types/qrcode':
+        specifier: 1.5.5
+        version: 1.5.5
       socket.io-client:
         specifier: 4.7.5
         version: 4.7.5
@@ -733,6 +739,9 @@ packages:
 
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
+
+  '@types/qrcode@1.5.5':
+    resolution: {integrity: sha512-CdfBi/e3Qk+3Z/fXYShipBT13OJ2fDO2Q2w5CIP5anLTLIndQG9z6P1cnm+8zCWSpm5dnxMFd/uREtb0EXuQzg==}
 
   '@types/qs@6.15.1':
     resolution: {integrity: sha512-GZHUBZR9hckSUhrxmp1nG6NwdpM9fCunJwyThLW1X3AyHgd9IlHb6VANpQQqDr2o/qQp6McZ3y/IA2rVzKzSbw==}
@@ -2209,6 +2218,10 @@ snapshots:
   '@types/offscreencanvas@2019.7.3': {}
 
   '@types/prop-types@15.7.15': {}
+
+  '@types/qrcode@1.5.5':
+    dependencies:
+      '@types/node': 20.14.2
 
   '@types/qs@6.15.1': {}
 
