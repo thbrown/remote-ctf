@@ -25,8 +25,9 @@ export function savePlayerIdentity(identity: PlayerIdentity): void {
 
 const ONBOARDED_KEY_PREFIX = 'foundry-ctf:onboarded:';
 
-/** Tracks whether a player has completed the one-time "scan your own QR" onboarding step
- * (OwnQrScreen), per playerId, so a refresh doesn't re-prompt someone who already did it. */
+/** Tracks whether a player has completed the one-time "claim your badge" onboarding step
+ * (ClaimBadgeScreen), per playerId, so a refresh doesn't re-prompt someone who already
+ * did it. */
 export function hasCompletedOnboarding(playerId: string): boolean {
   try {
     return localStorage.getItem(ONBOARDED_KEY_PREFIX + playerId) === '1';

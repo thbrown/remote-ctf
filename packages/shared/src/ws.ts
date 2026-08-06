@@ -52,6 +52,15 @@ export const PlayerUpdateSchema = z.object({
 });
 export type PlayerUpdatePayload = z.infer<typeof PlayerUpdateSchema>;
 
+/** Onboarding: a player claims a pre-printed physical badge (a `pl`-kind QR minted ahead
+ * of time, independent of any player record) by scanning it once. Whatever token they
+ * scan becomes their qrCodeToken - the same one others scan on their badge to tag them.
+ * Distinct from PlayerUpdateSchema since it's identity-claiming, not a profile edit. */
+export const ClaimQrSchema = z.object({
+  raw: z.string().min(1).max(500),
+});
+export type ClaimQrPayload = z.infer<typeof ClaimQrSchema>;
+
 // ---- Server -> Client ----
 
 export interface StateSnapshot {

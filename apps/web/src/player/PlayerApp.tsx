@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useGame } from '../useGame';
 import { hasCompletedOnboarding, markOnboardingComplete } from '../socket';
 import { RegistrationScreen } from './RegistrationScreen';
-import { OwnQrScreen } from './OwnQrScreen';
+import { ClaimBadgeScreen } from './ClaimBadgeScreen';
 import { GameplayScreen } from './GameplayScreen';
 
 export function PlayerApp() {
@@ -20,9 +20,9 @@ export function PlayerApp() {
 
   if (!onboarded) {
     return (
-      <OwnQrScreen
-        qrCodeToken={ownPlayer.qrCodeToken}
-        onConfirmed={() => {
+      <ClaimBadgeScreen
+        socket={socket}
+        onClaimed={() => {
           markOnboardingComplete(ownPlayer.playerId);
           setOnboarded(true);
         }}

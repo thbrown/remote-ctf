@@ -1,10 +1,13 @@
 /** Dev/testing aid, not part of doc01's normative surface: a standalone page with sample
- * `pl` (player) and `rp` (respawn location) QR codes to scan against a running Hub
- * without needing real players registered or real hardware.
+ * `pl` (player badge) and `rp` (respawn location) QR codes to scan against a running Hub
+ * without needing real printed badges or real hardware.
  *
- * The `pl` codes use synthetic tokens that don't belong to any real player - scanning one
- * will hit GameEngine.handleScan → attemptTag and get rejected (no matching player), which
- * is itself a useful signal that the camera/QR-decode/scan pipeline works end to end.
+ * The `pl` codes are exactly what a real pre-printed player badge looks like: a fixed
+ * `qrctf:1:pl:<token>` code, unclaimed until a player scans it during onboarding
+ * (ClaimBadgeScreen → `player:claimQr`), at which point that token becomes their
+ * qrCodeToken. Print/screenshot these 3 and use them as test badges - the first player to
+ * scan one claims it; scanning the same one again from a different player is rejected
+ * ("already_claimed").
  *
  * The `rp` codes use fixed IDs (`test-respawn-1..3`). Respawn locations normally get a
  * server-generated UUID, so these only resolve once you create matching locations via the
@@ -26,8 +29,8 @@ export async function renderTestQrHtml(): Promise<string> {
   const playerCards = TEST_PLAYER_TOKENS.map(
     (token, i) => `
     <div class="card">
-      <img src="${playerQrs[i]}" width="260" height="260" alt="Test player QR ${i + 1}" />
-      <div><strong>Test player ${i + 1}</strong></div>
+      <img src="${playerQrs[i]}" width="260" height="260" alt="Test player badge ${i + 1}" />
+      <div><strong>Test badge ${i + 1}</strong></div>
       <div><code>${encodePlQr(token)}</code></div>
     </div>`,
   ).join('');
@@ -62,14 +65,15 @@ export async function renderTestQrHtml(): Promise<string> {
 </head>
 <body>
   <h1>Foundry CTF — Test QR Codes</h1>
-  <p>For manual testing without real hardware or registered players. Not linked from the
+  <p>For manual testing without real printed badges or real hardware. Not linked from the
   join sheet — bookmark <code>/test-qr</code> directly.</p>
 
-  <h2>Player (tag) test codes</h2>
-  <p class="instructions">These use made-up tokens, not a real player's. Scanning one in
-  the Player app's camera confirms the scan/decode pipeline works, but the Hub will reject
-  the tag with "unknown player" since no one actually holds this token. To test a real tag,
-  scan another real player's own code from their <em>OwnQrScreen</em>/profile instead.</p>
+  <h2>Player badge test codes</h2>
+  <p class="instructions">These are real, claimable test badges. During onboarding
+  (registration → "Claim your badge"), scan one with the Player app's camera to claim it -
+  that token becomes your qrCodeToken, the same code other players scan on this badge to
+  tag you. Only the first player to scan a given badge gets it; anyone else scanning the
+  same one is rejected ("already claimed") - use badges 1/2/3 for separate test players.</p>
   <div class="row">${playerCards}</div>
 
   <h2>Respawn location test codes</h2>

@@ -76,7 +76,6 @@ input {
 .registration-screen button:disabled { opacity: 0.6; cursor: default; }
 
 .own-qr-screen { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px 20px; text-align: center; }
-.own-qr-code { width: 200px; height: 200px; background: white; padding: 8px; border-radius: 8px; }
 .own-qr-camera { position: relative; width: 100%; max-width: 320px; aspect-ratio: 1; background: black; border-radius: 12px; overflow: hidden; }
 .own-qr-camera video { width: 100%; height: 100%; object-fit: cover; }
 

@@ -15,8 +15,11 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
 import {
   CaptureCancelSchema,
+  ClaimQrSchema,
+  isQrParseError,
   LocationSchema,
   normalizeMac,
+  parseQr,
   PlayerUpdateSchema,
   ScanSchema,
   SessionHelloSchema,
@@ -149,6 +152,36 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
         patch.profilePicture = await store.attachments.put(bytes, 'image/jpeg'); // HUB-067 size check inside
       }
       if (Object.keys(patch).length > 0) await store.players.update(state.playerId, patch as any);
+    });
+
+    // Onboarding: player scans a pre-printed physical badge (a `pl` QR minted independently
+    // of any player record) and its token becomes their qrCodeToken - the same value others
+    // scan on that badge to tag them. Not part of doc00's Node/Respawn "claim" flows, but
+    // the same idea: whoever scans first gets it.
+    socket.on('player:claimQr', async (raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'player' || !state.playerId) return;
+      const parsed = ClaimQrSchema.safeParse(raw);
+      if (!parsed.success) {
+        ack?.({ ok: false, error: 'invalid_payload' });
+        return;
+      }
+      const qr = parseQr(parsed.data.raw);
+      if (isQrParseError(qr)) {
+        ack?.({ ok: false, error: 'unknown_qr' });
+        return;
+      }
+      if (qr.kind !== 'pl') {
+        ack?.({ ok: false, error: 'wrong_qr_kind' });
+        return;
+      }
+      const claimants = await store.players.list({ qrCodeToken: qr.qrCodeToken } as any);
+      const heldByOther = claimants.some((p: any) => p.playerId !== state.playerId);
+      if (heldByOther) {
+        ack?.({ ok: false, error: 'already_claimed' });
+        return;
+      }
+      await store.players.update(state.playerId, { qrCodeToken: qr.qrCodeToken } as any);
+      ack?.({ ok: true });
     });
 
     socket.on('admin:session:start', async (raw: unknown, ack?: (res: unknown) => void) => {

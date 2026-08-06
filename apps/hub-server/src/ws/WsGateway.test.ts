@@ -236,4 +236,47 @@ describe('WsGateway', () => {
     const afterDelete = await store.respawnLocations.list();
     expect(afterDelete).toHaveLength(0);
   });
+
+  it('player:claimQr sets qrCodeToken from a scanned pl badge', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+
+    const claimAck = await new Promise<any>((resolve) =>
+      player.emit('player:claimQr', { raw: 'qrctf:1:pl:BADGE-TOKEN-0000000001' }, resolve),
+    );
+    expect(claimAck.ok).toBe(true);
+
+    const record = await store.players.get(helloAck.playerId);
+    expect((record as any)?.qrCodeToken).toBe('BADGE-TOKEN-0000000001');
+  });
+
+  it('player:claimQr rejects a badge already claimed by a different player', async () => {
+    const first = connect();
+    const firstAck = await new Promise<any>((resolve) => first.emit('session:hello', { role: 'player' }, resolve));
+    await new Promise<any>((resolve) =>
+      first.emit('player:claimQr', { raw: 'qrctf:1:pl:SHARED-BADGE-000000001' }, resolve),
+    );
+
+    const second = connect();
+    await new Promise<any>((resolve) => second.emit('session:hello', { role: 'player' }, resolve));
+    const secondClaimAck = await new Promise<any>((resolve) =>
+      second.emit('player:claimQr', { raw: 'qrctf:1:pl:SHARED-BADGE-000000001' }, resolve),
+    );
+    expect(secondClaimAck.ok).toBe(false);
+    expect(secondClaimAck.error).toBe('already_claimed');
+
+    const firstRecord = await store.players.get(firstAck.playerId);
+    expect((firstRecord as any)?.qrCodeToken).toBe('SHARED-BADGE-000000001');
+  });
+
+  it('player:claimQr rejects a non-pl QR (e.g. a Control Point code)', async () => {
+    const player = connect();
+    await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+
+    const ack = await new Promise<any>((resolve) =>
+      player.emit('player:claimQr', { raw: `qrctf:1:cp:${CP_MAC}` }, resolve),
+    );
+    expect(ack.ok).toBe(false);
+    expect(ack.error).toBe('wrong_qr_kind');
+  });
 });
