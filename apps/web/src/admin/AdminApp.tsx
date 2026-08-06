@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { encodePlQr, encodeRpQr } from '@foundry-ctf/shared';
+import { encodePlQr, encodeRpQr, isQrParseError, parseQr } from '@foundry-ctf/shared';
 import { useGame } from '../useGame';
+import { AdminQrScanner } from './AdminQrScanner';
 import { QrThumbnail } from './QrThumbnail';
 
 interface NodeRow {
@@ -79,6 +80,7 @@ export function AdminApp() {
   const [rpCustomId, setRpCustomId] = useState('');
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [qrEdits, setQrEdits] = useState<Record<string, string>>({});
+  const [scanning, setScanning] = useState<'cp' | 'rp' | null>(null);
 
   function refreshRespawnLocations() {
     socket.emit('admin:respawnLocation:list', {}, (res: any) => {
@@ -109,6 +111,52 @@ export function AdminApp() {
 
   if (state.status !== 'connected') {
     return <div className="admin-login">Connecting…</div>;
+  }
+
+  function handleScan(raw: string) {
+    const kind = scanning;
+    setScanning(null);
+    const qr = parseQr(raw);
+    if (isQrParseError(qr)) {
+      alert('Could not read that QR code — try again.');
+      return;
+    }
+    if (kind === 'cp') {
+      if (qr.kind !== 'cp') {
+        alert("That's not a Control Point QR code.");
+        return;
+      }
+      setClaimMac(qr.macAddress);
+    } else if (kind === 'rp') {
+      if (qr.kind !== 'rp') {
+        alert("That's not a Respawn Point QR code.");
+        return;
+      }
+      setRpCustomId(qr.respawnLocationId);
+      // Best-effort: fill lat/long from wherever the admin is standing when they scan it -
+      // the QR itself only carries an ID, not a location. Not fatal if denied/unavailable;
+      // the admin can still type coordinates by hand.
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            setRpLat(String(pos.coords.latitude));
+            setRpLong(String(pos.coords.longitude));
+          },
+          () => {},
+          { timeout: 5000 },
+        );
+      }
+    }
+  }
+
+  if (scanning) {
+    return (
+      <AdminQrScanner
+        title={scanning === 'cp' ? 'Scan the Control Point QR code' : 'Scan the Respawn Point QR code'}
+        onScan={handleScan}
+        onCancel={() => setScanning(null)}
+      />
+    );
   }
 
   function setPlayerQrCode(playerId: string) {
@@ -324,6 +372,7 @@ export function AdminApp() {
         <div className="claim-form">
           <input value={claimMac} onChange={(e) => setClaimMac(e.target.value)} placeholder="MAC address (AA:BB:CC:DD:EE:FF)" />
           <input value={claimName} onChange={(e) => setClaimName(e.target.value)} placeholder="Control Point name" />
+          <button onClick={() => setScanning('cp')}>Scan QR</button>
           <button onClick={claimNode}>Claim</button>
         </div>
         <table>
@@ -357,6 +406,7 @@ export function AdminApp() {
             onChange={(e) => setRpCustomId(e.target.value)}
             placeholder="Custom ID (optional, e.g. to match a pre-printed test QR)"
           />
+          <button onClick={() => setScanning('rp')}>Scan QR</button>
         </div>
         <div className="team-toggle-list">
           <span>Allowed teams (none checked = any team):</span>
