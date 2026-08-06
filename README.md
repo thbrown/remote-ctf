@@ -103,7 +103,7 @@ for the full list and defaults). The ones you're most likely to set for a real d
    other reason), run `sudo ./ops/recover-pi-ap.sh` (or `sudo AP_IFACE=wlan1
    ./ops/recover-pi-ap.sh` if it's not `wlan0`) at the Pi's console. The script also
    installs an `iptables` redirect from `:80`/`:443` to the Hub's normal unprivileged
-   ports (`8080`/`8443`) on the AP interface, so players still just navigate to
+   ports (`8000`/`8443`) on the AP interface, so players still just navigate to
    `https://<AP_IP>` with no port in the URL, but the Hub process itself never needs
    root or any special capability to bind — `setcap` turned out to be unreliable on
    some Pi OS setups (fails with "effective file capabilities must either be empty or

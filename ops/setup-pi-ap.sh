@@ -192,11 +192,11 @@ systemctl restart hostapd
 # which fails with "effective file capabilities must either be empty or
 # exactly match..." on some Pi OS setups, e.g. with the read-only overlay
 # filesystem option enabled), redirect the well-known ports to the Hub's
-# normal unprivileged ones (8080/8443, same as dev) at the netfilter level.
+# normal unprivileged ones (8000/8443 - 8080 is spectatorApp's port, so portal can't reuse it) at the netfilter level.
 # This only needs root once, here, never for the Hub process itself - so
 # ops/run-hub.sh runs entirely as a normal user. Installed as a systemd
 # oneshot (like the static-IP unit above) so it's reapplied on every boot.
-log "Installing port-redirect unit (:80->8080, :443->8443 on ${AP_IFACE})..."
+log "Installing port-redirect unit (:80->8000, :443->8443 on ${AP_IFACE})..."
 redirect_unit=/etc/systemd/system/foundry-ctf-port-redirect.service
 cat >"${redirect_unit}" <<EOF
 [Unit]
@@ -207,9 +207,9 @@ BindsTo=sys-subsystem-net-devices-${AP_IFACE}.device
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c '/sbin/iptables -t nat -C PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8080 || /sbin/iptables -t nat -A PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8080'
+ExecStart=/bin/sh -c '/sbin/iptables -t nat -C PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8000 || /sbin/iptables -t nat -A PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8000'
 ExecStart=/bin/sh -c '/sbin/iptables -t nat -C PREROUTING -i ${AP_IFACE} -p tcp --dport 443 -j REDIRECT --to-port 8443 || /sbin/iptables -t nat -A PREROUTING -i ${AP_IFACE} -p tcp --dport 443 -j REDIRECT --to-port 8443'
-ExecStop=/sbin/iptables -t nat -D PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8080
+ExecStop=/sbin/iptables -t nat -D PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8000
 ExecStop=/sbin/iptables -t nat -D PREROUTING -i ${AP_IFACE} -p tcp --dport 443 -j REDIRECT --to-port 8443
 
 [Install]
@@ -251,9 +251,9 @@ else
   ok=0
 fi
 
-if iptables -t nat -C PREROUTING -i "${AP_IFACE}" -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null \
+if iptables -t nat -C PREROUTING -i "${AP_IFACE}" -p tcp --dport 80 -j REDIRECT --to-port 8000 2>/dev/null \
   && iptables -t nat -C PREROUTING -i "${AP_IFACE}" -p tcp --dport 443 -j REDIRECT --to-port 8443 2>/dev/null; then
-  log "  [ok] :80/:443 redirect to 8080/8443 on ${AP_IFACE}"
+  log "  [ok] :80/:443 redirect to 8000/8443 on ${AP_IFACE}"
 else
   log "  [FAIL] port redirect rules missing - check: systemctl status foundry-ctf-port-redirect"
   ok=0
