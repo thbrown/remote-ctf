@@ -117,6 +117,15 @@ describe('WsGateway', () => {
     return c;
   }
 
+  /** admin:session:start derives its active teams from who has already joined - tests that
+   * need >=2 active teams just need a player sitting on each, not an admin-picked list. */
+  async function createPlayerOnTeam(teamId: string): Promise<string> {
+    const c = connect();
+    const ack = await new Promise<any>((resolve) => c.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(ack.playerId, { teamId } as any);
+    return ack.playerId;
+  }
+
   it('player hello gets an ack with identity and a snapshot', async () => {
     const client = connect();
 
@@ -165,9 +174,11 @@ describe('WsGateway', () => {
   it("spectator scan events are dropped (HUB-094) — no capture starts", async () => {
     const admin = connect();
     await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
-    await new Promise<any>((resolve) =>
-      admin.emit('admin:session:start', { sessionName: 'R1', activeTeamIds: [TEAM_A, TEAM_B] }, resolve),
-    );
+    // admin:session:start now derives active teams from who has joined - it needs >=2
+    // teams with a player already on them, not an admin-picked list.
+    await createPlayerOnTeam(TEAM_A);
+    await createPlayerOnTeam(TEAM_B);
+    await new Promise<any>((resolve) => admin.emit('admin:session:start', { sessionName: 'R1' }, resolve));
 
     const spectator = connect();
     await new Promise<any>((resolve) => spectator.emit('session:hello', { role: 'spectator' }, resolve));
@@ -184,14 +195,16 @@ describe('WsGateway', () => {
   it('admin session:start then a player scan starts a capture, broadcast to everyone', async () => {
     const admin = connect();
     await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
-    const startAck = await new Promise<any>((resolve) =>
-      admin.emit('admin:session:start', { sessionName: 'R1', activeTeamIds: [TEAM_A, TEAM_B] }, resolve),
-    );
-    expect(startAck.ok).toBe(true);
 
     const player = connect();
     const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
     await store.players.update(helloAck.playerId, { teamId: TEAM_A });
+    await createPlayerOnTeam(TEAM_B);
+
+    const startAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:session:start', { sessionName: 'R1' }, resolve),
+    );
+    expect(startAck.ok).toBe(true);
 
     const capturePromise = waitFor<any>(player, 'capture:started');
     player.emit('scan', { raw: `qrctf:1:cp:${CP_MAC}`, clientTs: Date.now() });
@@ -360,6 +373,57 @@ describe('WsGateway', () => {
     void firstAck;
   });
 
+  it('admin:session:start derives active teams from who has joined, not an admin-picked list', async () => {
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+
+    const onlyOneTeamAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:session:start', { sessionName: 'R1' }, resolve),
+    );
+    expect(onlyOneTeamAck.ok).toBe(false);
+    expect(onlyOneTeamAck.error).toBe('need_at_least_two_teams_with_players');
+
+    await createPlayerOnTeam(TEAM_A);
+    await createPlayerOnTeam(TEAM_B);
+    const startAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:session:start', { sessionName: 'R1' }, resolve),
+    );
+    expect(startAck.ok).toBe(true);
+    const teamSessions = await store.teamSessions.list({ sessionId: startAck.sessionId } as any);
+    expect(teamSessions.map((ts: any) => ts.teamId).sort()).toEqual([TEAM_A, TEAM_B].sort());
+  });
+
+  it('admin:player:remove deletes a player with no session history', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+    const removeAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:player:remove', { playerId: helloAck.playerId }, resolve),
+    );
+    expect(removeAck.ok).toBe(true);
+    expect(await store.players.get(helloAck.playerId)).toBeNull();
+  });
+
+  it('admin:player:remove refuses to delete a player who has already played a session', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(helloAck.playerId, { teamId: TEAM_A } as any);
+    await createPlayerOnTeam(TEAM_B);
+
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+    await new Promise<any>((resolve) => admin.emit('admin:session:start', { sessionName: 'R1' }, resolve));
+
+    const removeAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:player:remove', { playerId: helloAck.playerId }, resolve),
+    );
+    expect(removeAck.ok).toBe(false);
+    expect(removeAck.error).toBe('player_has_session_history');
+    expect(await store.players.get(helloAck.playerId)).not.toBeNull();
+  });
+
   it('session:hello rejects a bad admin PIN with an ack and disconnects the socket', async () => {
     const admin = connect();
     const ack = await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: 'wrong' }, resolve));
@@ -417,11 +481,12 @@ describe('WsGateway', () => {
     const player = connect();
     const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
     await store.players.update(helloAck.playerId, { teamId: TEAM_A } as any);
+    await createPlayerOnTeam(TEAM_B);
 
     const admin = connect();
     await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
     const startAck = await new Promise<any>((resolve) =>
-      admin.emit('admin:session:start', { sessionName: 'R1', activeTeamIds: [TEAM_A, TEAM_B] }, resolve),
+      admin.emit('admin:session:start', { sessionName: 'R1' }, resolve),
     );
     expect(startAck.ok).toBe(true);
 

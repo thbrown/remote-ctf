@@ -230,9 +230,18 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
 
     socket.on('admin:session:start', async (raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'admin') return;
-      const body = (raw ?? {}) as { sessionName?: string; activeTeamIds?: string[] };
+      const body = (raw ?? {}) as { sessionName?: string };
+      // activeTeamIds is derived, not admin-picked: any team with >=1 player is active.
+      // A team with zero players can't meaningfully play, so there's nothing for a
+      // checkbox to opt in/out of.
+      const players = await store.players.list({ stationId } as any);
+      const activeTeamIds = [...new Set(players.map((p: any) => p.teamId).filter((id): id is string => !!id))];
+      if (activeTeamIds.length < 2) {
+        ack?.({ ok: false, error: 'need_at_least_two_teams_with_players' });
+        return;
+      }
       try {
-        const session = await engine.startSession(stationId, body.sessionName ?? 'Session', body.activeTeamIds ?? []);
+        const session = await engine.startSession(stationId, body.sessionName ?? 'Session', activeTeamIds);
         ack?.({ ok: true, sessionId: session.sessionId });
       } catch (err) {
         ack?.({ ok: false, error: (err as Error).message });
@@ -368,6 +377,27 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
         qrCodeToken: parsed.data.qrCodeToken,
         qrCodeClaimed: true,
       } as any);
+      ack?.({ ok: true });
+    });
+
+    // Removes a player record outright - but only if they've never actually played a
+    // session (no QrCtfPlayerSession rows), since deleting a player who has one would
+    // orphan that session's historical tag/capture/score data. A player who registered
+    // but the game never started for (or who joined after a session already ended) is
+    // exactly the case this exists for - cleaning up test/duplicate/no-show registrations.
+    socket.on('admin:player:remove', async (raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'admin') return;
+      const body = (raw ?? {}) as { playerId?: string };
+      if (!body.playerId) {
+        ack?.({ ok: false, error: 'invalid_payload' });
+        return;
+      }
+      const playerSessions = await store.playerSessions.list({ playerId: body.playerId } as any);
+      if (playerSessions.length > 0) {
+        ack?.({ ok: false, error: 'player_has_session_history' });
+        return;
+      }
+      await store.players.delete(body.playerId);
       ack?.({ ok: true });
     });
 

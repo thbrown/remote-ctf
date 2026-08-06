@@ -69,7 +69,6 @@ export function AdminApp() {
   const { socket, state } = useGame('admin', submittedPin);
 
   const [sessionName, setSessionName] = useState('Round 1');
-  const [activeTeamIds, setActiveTeamIds] = useState<string[]>([]);
   const [nodes, setNodes] = useState<NodeRow[]>([]);
   const [claimMac, setClaimMac] = useState('');
   const [claimName, setClaimName] = useState('');
@@ -128,18 +127,41 @@ export function AdminApp() {
     });
   }
 
-  function toggleActiveTeam(teamId: string) {
-    setActiveTeamIds((ids) => (ids.includes(teamId) ? ids.filter((id) => id !== teamId) : [...ids, teamId]));
-  }
+  // activeTeamIds isn't admin-picked anymore - the server derives it from whichever teams
+  // currently have >=1 player, since a team with no players can't play. This is just a
+  // preview of that for the admin's benefit before hitting start.
+  const teamIdsWithPlayers = [...new Set(players.map((p) => p.teamId).filter((id): id is string => !!id))];
+  const teamsWithPlayers = state.teams.filter((t) => teamIdsWithPlayers.includes(t.teamId));
 
   function startSession() {
-    socket.emit('admin:session:start', { sessionName, activeTeamIds }, (res: any) => {
-      if (!res?.ok) alert(`Failed to start session: ${res?.error}`);
+    socket.emit('admin:session:start', { sessionName }, (res: any) => {
+      if (!res?.ok) {
+        const message =
+          res?.error === 'need_at_least_two_teams_with_players'
+            ? 'Need at least 2 teams with players joined before starting.'
+            : res?.error;
+        alert(`Failed to start session: ${message}`);
+      }
     });
   }
 
   function stopSession() {
     socket.emit('admin:session:stop', {}, () => {});
+  }
+
+  function removePlayer(playerId: string, playerName: string) {
+    if (!confirm(`Remove ${playerName}? This only works if they haven't played in a session yet.`)) return;
+    socket.emit('admin:player:remove', { playerId }, (res: any) => {
+      if (!res?.ok) {
+        const message =
+          res?.error === 'player_has_session_history'
+            ? "Can't remove - this player has already played in a session (would orphan their history)."
+            : res?.error;
+        alert(`Failed to remove player: ${message}`);
+        return;
+      }
+      setPlayers((ps) => ps.filter((p) => p.playerId !== playerId));
+    });
   }
 
   function claimNode() {
@@ -203,19 +225,16 @@ export function AdminApp() {
             <>
               <input value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="Session name" />
               <div className="team-toggle-list">
-                {state.teams.map((t) => (
-                  <label key={t.teamId} className="team-toggle">
-                    <input
-                      type="checkbox"
-                      checked={activeTeamIds.includes(t.teamId)}
-                      onChange={() => toggleActiveTeam(t.teamId)}
-                    />
+                <span>Teams with players joined (these will be active):</span>
+                {teamsWithPlayers.length === 0 && <span>— none yet</span>}
+                {teamsWithPlayers.map((t) => (
+                  <span key={t.teamId} className="team-toggle">
                     <span className="swatch" style={{ background: t.hexColor }} />
                     {t.teamName}
-                  </label>
+                  </span>
                 ))}
               </div>
-              <button onClick={startSession} disabled={activeTeamIds.length < 2}>
+              <button onClick={startSession} disabled={teamsWithPlayers.length < 2}>
                 Start session
               </button>
             </>
@@ -232,7 +251,7 @@ export function AdminApp() {
               <tr>
                 <th>Photo</th><th>Name</th><th>Team</th><th>Status</th><th>Connected</th>
                 <th>Tags for</th><th>Tags against</th><th>K/D</th><th>Points captured</th>
-                <th>QR code ID</th><th>Badge</th>
+                <th>QR code ID</th><th>Badge</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -275,6 +294,7 @@ export function AdminApp() {
                       </div>
                     </td>
                     <td>{p.qrCodeClaimed && <QrThumbnail value={encodePlQr(p.qrCodeToken)} size={64} />}</td>
+                    <td><button onClick={() => removePlayer(p.playerId, p.playerName)}>Remove</button></td>
                   </tr>
                 );
               })}
@@ -371,6 +391,7 @@ export function AdminApp() {
       </div>
 
       <section>
+        <h2>Resources</h2>
         <a href="/join-sheet" target="_blank" rel="noreferrer">Print Join Sheet</a>
         {' · '}
         <a href="/test-qr" target="_blank" rel="noreferrer">Test QR Codes</a>
