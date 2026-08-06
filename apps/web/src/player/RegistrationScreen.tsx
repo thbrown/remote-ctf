@@ -1,23 +1,7 @@
 import { useState } from 'react';
 import type { QrCtfTeam } from '@foundry-ctf/shared';
 import type { Socket } from 'socket.io-client';
-
-const MAX_PHOTO_PX = 128; // HUB-171
-
-async function downscalePhoto(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_PHOTO_PX / Math.max(bitmap.width, bitmap.height));
-  const w = Math.max(1, Math.round(bitmap.width * scale));
-  const h = Math.max(1, Math.round(bitmap.height * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('canvas unsupported');
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-  return dataUrl.slice(dataUrl.indexOf(',') + 1); // server expects raw base64, not a data: URL
-}
+import { downscalePhoto } from './photo';
 
 /** Registration happens before gameplay starts, so it doesn't need camera-stream or
  * geolocation permissions - those are requested later by GameplayScreen, once there's

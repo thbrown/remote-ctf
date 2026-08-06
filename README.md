@@ -77,7 +77,7 @@ for the full list and defaults). The ones you're most likely to set for a real d
 | `NODE_ENV` | `development` | Set to `production` for the Pi deploy (changes default ports/TLS behavior) |
 | `DATA_DIR` | `./data` | Where session/store state and the persisted `STATION_ID` live |
 | `STORE_DRIVER` | `filesystem` | `inmemory` or `filesystem` |
-| `PUBLIC_ORIGIN` | `https://10.0.0.1` (prod) | The address players' phones will reach the Hub at |
+| `PUBLIC_ORIGIN` | auto-detected LAN IP | The address players' phones will reach the Hub at. Auto-detected from the first non-internal network interface if unset (logged on boot) — **set this explicitly if the Pi has more than one network interface** (e.g. AP on a USB Wi-Fi adapter, internet on the built-in radio), since auto-detection can guess the wrong one |
 | `WIFI_SSID` / `WIFI_PSK` | `FoundryCTF` / `capturetheflag` | Shown on the join sheet |
 | `ADMIN_PIN` | `1234` | **Change this before running a real game** |
 | `TLS_MODE` | `selfsigned` | Set to `provided` with `TLS_CERT_PATH`/`TLS_KEY_PATH` to use a real cert |
@@ -92,12 +92,15 @@ for the full list and defaults). The ones you're most likely to set for a real d
 3. Clone this repo onto the Pi and run `pnpm install`.
 4. Build the web app: `pnpm --filter @foundry-ctf/web build`.
 5. Build the server: `pnpm --filter @foundry-ctf/hub-server build`.
-6. Set `NODE_ENV=production`, `ADMIN_PIN`, `PUBLIC_ORIGIN` (the Pi's LAN-facing IP), and
-   any Wi-Fi/TLS overrides you need, then start it:
+6. Set `NODE_ENV=production` and `ADMIN_PIN`, then start it:
    ```bash
-   NODE_ENV=production ADMIN_PIN=<pin> PUBLIC_ORIGIN=https://<pi-ip> \
-     pnpm --filter @foundry-ctf/hub-server start
+   NODE_ENV=production ADMIN_PIN=<pin> pnpm --filter @foundry-ctf/hub-server start
    ```
+   `PUBLIC_ORIGIN` is auto-detected from the Pi's LAN IP and logged on boot — pass it
+   explicitly (`PUBLIC_ORIGIN=https://10.0.0.1`) if the Pi has more than one network
+   interface (e.g. the AP running on a USB Wi-Fi adapter per
+   [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)), since auto-detection
+   can't tell which interface is the game network.
 7. Confirm all four listeners come up (`nodeApp`, `deviceApp`, `spectatorApp`, and
    `portalApp` if enabled) and that `tools/sim-control-point` (or real Control Point
    hardware, once built per `docs/02-FIRMWARE.md`) can register against it.

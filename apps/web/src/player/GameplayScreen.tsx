@@ -4,6 +4,7 @@ import QrScanner from 'qr-scanner';
 import QrScannerWorkerPath from 'qr-scanner/qr-scanner-worker.min.js?url';
 import type { Socket } from 'socket.io-client';
 import type { GameState } from '../useGame';
+import { downscalePhoto } from './photo';
 
 QrScanner.WORKER_PATH = QrScannerWorkerPath;
 
@@ -18,6 +19,10 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
   const lastScanRef = useRef<{ raw: string; atMs: number } | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [nameInput, setNameInput] = useState('');
+  const [teamInput, setTeamInput] = useState<string | null>(null);
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!videoRef.current) return;
@@ -64,8 +69,35 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
   const team = ownPlayer?.teamId ? state.teams.find((t) => t.teamId === ownPlayer.teamId) : null;
   const taggedOut = ownPlayer?.playerStatus === 'tagged_out';
 
+  function openEditProfile() {
+    setNameInput(ownPlayer?.playerName ?? '');
+    setTeamInput(ownPlayer?.teamId ?? null);
+    setPhotoBase64(null);
+    setPhotoPreview(ownPlayer?.profilePicture ?? null);
+    setPhotoError(null);
+    setEditingProfile(true);
+  }
+
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoError(null);
+    try {
+      const base64 = await downscalePhoto(file);
+      setPhotoBase64(base64);
+      setPhotoPreview(`data:image/jpeg;base64,${base64}`);
+    } catch (err) {
+      console.error('photo processing failed', err);
+      setPhotoError('Could not use that photo — try a different one.');
+    }
+  }
+
   function saveProfile() {
-    socket.emit('player:update', { playerName: nameInput || undefined });
+    socket.emit('player:update', {
+      playerName: nameInput || undefined,
+      ...(teamInput && teamInput !== ownPlayer?.teamId ? { teamId: teamInput } : {}),
+      ...(photoBase64 ? { profilePicture: photoBase64 } : {}),
+    });
     setEditingProfile(false);
   }
 
@@ -105,21 +137,43 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
           <span className="swatch" style={{ background: team?.hexColor }} />
           <strong>{ownPlayer?.playerName}</strong>
           <span className={`badge badge-${ownPlayer?.playerStatus}`}>{ownPlayer?.playerStatus}</span>
-          <button
-            onClick={() => {
-              setNameInput(ownPlayer?.playerName ?? '');
-              setEditingProfile(true);
-            }}
-          >
-            Edit
-          </button>
+          <button onClick={openEditProfile}>Edit</button>
         </div>
 
         {editingProfile && (
           <div className="profile-dialog">
-            <input value={nameInput} onChange={(e) => setNameInput(e.target.value)} placeholder="Player name" />
-            <button onClick={saveProfile}>Save</button>
-            <button onClick={() => setEditingProfile(false)}>Close</button>
+            <label className="field">
+              Name
+              <input value={nameInput} onChange={(e) => setNameInput(e.target.value)} placeholder="Player name" />
+            </label>
+
+            <label className="field photo-field">
+              Photo
+              <input type="file" accept="image/*" capture="user" onChange={handlePhotoChange} />
+            </label>
+            {photoPreview && <img className="photo-preview" src={photoPreview} alt="Your photo" />}
+            {photoError && <div className="form-error">{photoError}</div>}
+
+            <div className="field">
+              Team
+              <div className="team-picker">
+                {state.teams.map((t) => (
+                  <button
+                    key={t.teamId}
+                    style={{ background: t.hexColor, outline: teamInput === t.teamId ? '3px solid white' : 'none' }}
+                    onClick={() => setTeamInput(t.teamId)}
+                  >
+                    {t.teamName}
+                    {teamInput === t.teamId ? ' ✓' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="profile-dialog-actions">
+              <button onClick={saveProfile}>Save</button>
+              <button onClick={() => setEditingProfile(false)}>Close</button>
+            </div>
           </div>
         )}
 

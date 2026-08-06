@@ -65,12 +65,14 @@ input {
 .scoreboard-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .rejection-toast { margin-top: 8px; padding: 6px 10px; background: #a33; border-radius: 6px; }
 .event-log { margin-top: 12px; font-size: 0.85rem; opacity: 0.8; max-height: 120px; overflow-y: auto; }
-.profile-dialog { display: flex; gap: 8px; margin: 8px 0; }
+.profile-dialog { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; padding: 12px; background: #1c1f26; border-radius: 8px; }
+.profile-dialog-actions { display: flex; gap: 8px; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.photo-preview { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; align-self: flex-start; }
+.form-error { color: #ff8080; font-size: 0.9rem; }
 
 .registration-screen { display: flex; flex-direction: column; gap: 12px; padding: 24px 20px; max-width: 420px; margin: 0 auto; }
-.registration-screen .field { display: flex; flex-direction: column; gap: 6px; }
-.registration-screen .photo-preview { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; align-self: flex-start; }
-.registration-screen .form-error { color: #ff8080; font-size: 0.9rem; }
 .registration-screen button:disabled { opacity: 0.6; cursor: default; }
 
 .admin-app { padding: 20px; max-width: 900px; margin: 0 auto; }
