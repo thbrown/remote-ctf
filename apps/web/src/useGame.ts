@@ -186,6 +186,12 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     socket.on('session:ended', onSessionEnded);
 
     if (socket.connected) sendHello();
+    // A server-initiated disconnect.disconnect(true) - e.g. a bad admin PIN - leaves the
+    // reason as "io server disconnect", which by Socket.IO's own design does NOT
+    // auto-reconnect (unlike a transport/network drop). Retrying (a new role/adminPin,
+    // which re-runs this effect) needs an explicit connect() or the socket just sits
+    // disconnected forever with nothing ever calling sendHello() again.
+    else socket.connect();
 
     return () => {
       socket.off('connect', onConnect);
