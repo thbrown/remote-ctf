@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { encodeRpQr } from '@foundry-ctf/shared';
 import { useGame } from '../useGame';
+import { QrThumbnail } from './QrThumbnail';
 
 interface NodeRow {
   mac: string;
@@ -32,6 +34,7 @@ export function AdminApp() {
   const [rpLat, setRpLat] = useState('');
   const [rpLong, setRpLong] = useState('');
   const [rpTeamIds, setRpTeamIds] = useState<string[]>([]);
+  const [rpCustomId, setRpCustomId] = useState('');
 
   function refreshRespawnLocations() {
     socket.emit('admin:respawnLocation:list', {}, (res: any) => {
@@ -100,15 +103,20 @@ export function AdminApp() {
       alert('lat/long must be numbers');
       return;
     }
-    socket.emit('admin:respawnLocation:create', { lat, long, allowedTeamIds: rpTeamIds }, (res: any) => {
-      if (!res?.ok) alert(`Failed: ${res?.error}`);
-      else {
-        setRpLat('');
-        setRpLong('');
-        setRpTeamIds([]);
-        refreshRespawnLocations();
-      }
-    });
+    socket.emit(
+      'admin:respawnLocation:create',
+      { lat, long, allowedTeamIds: rpTeamIds, respawnLocationId: rpCustomId.trim() || undefined },
+      (res: any) => {
+        if (!res?.ok) alert(`Failed: ${res?.error}`);
+        else {
+          setRpLat('');
+          setRpLong('');
+          setRpTeamIds([]);
+          setRpCustomId('');
+          refreshRespawnLocations();
+        }
+      },
+    );
   }
 
   function deleteRespawnLocation(respawnLocationId: string) {
@@ -223,6 +231,11 @@ export function AdminApp() {
         <div className="claim-form">
           <input value={rpLat} onChange={(e) => setRpLat(e.target.value)} placeholder="Latitude" />
           <input value={rpLong} onChange={(e) => setRpLong(e.target.value)} placeholder="Longitude" />
+          <input
+            value={rpCustomId}
+            onChange={(e) => setRpCustomId(e.target.value)}
+            placeholder="Custom ID (optional, e.g. to match a pre-printed test QR)"
+          />
         </div>
         <div className="team-toggle-list">
           <span>Allowed teams (none checked = any team):</span>
@@ -236,10 +249,11 @@ export function AdminApp() {
         </div>
         <button onClick={createRespawnLocation}>Add respawn location</button>
         <table>
-          <thead><tr><th>Lat</th><th>Long</th><th>Allowed teams</th><th></th></tr></thead>
+          <thead><tr><th>QR</th><th>Lat</th><th>Long</th><th>Allowed teams</th><th></th></tr></thead>
           <tbody>
             {respawnLocations.map((rp) => (
               <tr key={rp.respawnLocationId}>
+                <td><QrThumbnail value={encodeRpQr(rp.respawnLocationId)} /></td>
                 <td>{rp.locationLat}</td>
                 <td>{rp.locationLong}</td>
                 <td>{rp.allowedTeamIds.length === 0 ? 'any' : rp.allowedTeamIds.map((id) => state.teams.find((t) => t.teamId === id)?.teamName ?? id).join(', ')}</td>
@@ -252,6 +266,8 @@ export function AdminApp() {
 
       <section>
         <a href="/join-sheet" target="_blank" rel="noreferrer">Print Join Sheet</a>
+        {' · '}
+        <a href="/test-qr" target="_blank" rel="noreferrer">Test QR Codes</a>
       </section>
 
       <section>

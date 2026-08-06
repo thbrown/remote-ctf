@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+#
+# Convenience wrapper for starting the Hub in production mode with a pinned
+# PUBLIC_ORIGIN instead of relying on auto-detection (see apps/hub-server/src/config.ts).
+# Matches the AP_IP used by ops/setup-pi-ap.sh (10.0.0.1 by default).
+#
+# Usage:
+#   sudo ./ops/setup-pi-ap.sh          # once, to bring up the AP
+#   ./ops/run-hub.sh                    # every time you start the game
+#
+# Override AP_IP/ADMIN_PIN via env vars, same as setup-pi-ap.sh:
+#   AP_IP=10.0.0.1 ADMIN_PIN=1234 ./ops/run-hub.sh
+#
+set -euo pipefail
+
+AP_IP="${AP_IP:-10.0.0.1}"
+
+export NODE_ENV=production
+export PUBLIC_ORIGIN="${PUBLIC_ORIGIN:-https://${AP_IP}}"
+export ADMIN_PIN="${ADMIN_PIN:-1234}"
+
+if [[ "${ADMIN_PIN}" == "1234" ]]; then
+  echo "[run-hub] WARNING: using default ADMIN_PIN=1234 - fine for testing, change it for a real game." >&2
+fi
+
+echo "[run-hub] PUBLIC_ORIGIN=${PUBLIC_ORIGIN}"
+exec pnpm --filter @foundry-ctf/hub-server start

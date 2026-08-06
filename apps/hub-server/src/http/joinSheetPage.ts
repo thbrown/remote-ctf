@@ -5,12 +5,13 @@ import type { Config } from '../config.js';
 
 export async function renderJoinSheetHtml(config: Config): Promise<string> {
   const wifiPayload = `WIFI:T:WPA;S:${config.wifiSsid};P:${config.wifiPsk};H:false;;`;
-  const [wifiQr, appQr] = await Promise.all([
+  const scoreboardUrl = config.publicOrigin.replace(/^https:\/\//, 'http://').replace(/:\d+$/, `:${config.spectatorHttpPort}`) + '/scoreboard';
+
+  const [wifiQr, appQr, spectatorQr] = await Promise.all([
     QRCode.toDataURL(wifiPayload, { margin: 1, width: 300 }),
     QRCode.toDataURL(config.publicOrigin, { margin: 1, width: 300 }),
+    QRCode.toDataURL(scoreboardUrl, { margin: 1, width: 300 }),
   ]);
-
-  const scoreboardUrl = config.publicOrigin.replace(/^https:\/\//, 'http://').replace(/:\d+$/, `:${config.spectatorHttpPort}`) + '/scoreboard';
 
   return `<!doctype html>
 <html>
@@ -38,17 +39,20 @@ export async function renderJoinSheetHtml(config: Config): Promise<string> {
       <img src="${wifiQr}" width="300" height="300" alt="Wi-Fi QR" />
       <div><strong>1. Join Wi-Fi</strong></div>
       <div>SSID: <code>${config.wifiSsid}</code></div>
+      <div>Password: <code>${config.wifiPsk}</code></div>
     </div>
     <div class="card">
-      <img src="${appQr}" width="300" height="300" alt="App QR" />
-      <div><strong>2. Open the Web App</strong></div>
+      <img src="${appQr}" width="300" height="300" alt="Player app QR" />
+      <div><strong>2a. Join as player</strong></div>
       <div><code>${config.publicOrigin}</code></div>
     </div>
+    <div class="card">
+      <img src="${spectatorQr}" width="300" height="300" alt="Spectator scoreboard QR" />
+      <div><strong>2b. Join as spectator</strong></div>
+      <div>No login, no camera — safe to leave on a venue TV.</div>
+      <div><code>${scoreboardUrl}</code></div>
+    </div>
   </div>
-
-  <p>Spectator scoreboard (no login, no camera, safe to leave on a venue TV):<br />
-    <code>${scoreboardUrl}</code>
-  </p>
 
   <div class="instructions">
     <h2>First-time certificate warning</h2>

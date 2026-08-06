@@ -92,18 +92,23 @@ for the full list and defaults). The ones you're most likely to set for a real d
 3. Clone this repo onto the Pi and run `pnpm install`.
 4. Build the web app: `pnpm --filter @foundry-ctf/web build`.
 5. Build the server: `pnpm --filter @foundry-ctf/hub-server build`.
-6. Set `NODE_ENV=production` and `ADMIN_PIN`, then start it:
+6. Start it. `PUBLIC_ORIGIN` is auto-detected from the Pi's LAN IP and logged on boot, but
+   with more than one network interface (e.g. the AP running on a USB Wi-Fi adapter per
+   [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)) auto-detection can't
+   tell which one is the game network, so pin it explicitly instead of guessing:
    ```bash
-   NODE_ENV=production ADMIN_PIN=<pin> pnpm --filter @foundry-ctf/hub-server start
+   ./ops/run-hub.sh   # NODE_ENV=production, PUBLIC_ORIGIN=https://<AP_IP> (10.0.0.1 by default)
    ```
-   `PUBLIC_ORIGIN` is auto-detected from the Pi's LAN IP and logged on boot — pass it
-   explicitly (`PUBLIC_ORIGIN=https://10.0.0.1`) if the Pi has more than one network
-   interface (e.g. the AP running on a USB Wi-Fi adapter per
-   [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)), since auto-detection
-   can't tell which interface is the game network.
+   or set the same env vars by hand:
+   ```bash
+   NODE_ENV=production ADMIN_PIN=<pin> PUBLIC_ORIGIN=https://10.0.0.1 \
+     pnpm --filter @foundry-ctf/hub-server start
+   ```
 7. Confirm all four listeners come up (`nodeApp`, `deviceApp`, `spectatorApp`, and
    `portalApp` if enabled) and that `tools/sim-control-point` (or real Control Point
-   hardware, once built per `docs/02-FIRMWARE.md`) can register against it.
+   hardware, once built per `docs/02-FIRMWARE.md`) can register against it. `/test-qr`
+   (linked from the Admin app) has sample player/respawn QR codes for testing scans
+   without needing real players or hardware — see the page itself for how to use it.
 
 ## Tests
 

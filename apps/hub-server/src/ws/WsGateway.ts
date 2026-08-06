@@ -206,13 +206,21 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
 
     socket.on('admin:respawnLocation:create', async (raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'admin') return;
-      const body = (raw ?? {}) as { lat?: number; long?: number; allowedTeamIds?: string[] };
+      const body = (raw ?? {}) as { lat?: number; long?: number; allowedTeamIds?: string[]; respawnLocationId?: string };
       if (typeof body.lat !== 'number' || typeof body.long !== 'number') {
         ack?.({ ok: false, error: 'lat/long required' });
         return;
       }
+      // Custom IDs are opt-in and only meaningful within this Hub (never sent to
+      // firmware) - lets a pre-printed test QR (qrctf:1:rp:<id>) resolve once the
+      // matching location is created here, without needing to reprint anything.
+      const customId = typeof body.respawnLocationId === 'string' ? body.respawnLocationId.trim() : '';
+      if (customId && customId.length > 100) {
+        ack?.({ ok: false, error: 'respawnLocationId too long' });
+        return;
+      }
       const location = await store.respawnLocations.create({
-        respawnLocationId: randomUUID(),
+        respawnLocationId: customId || randomUUID(),
         stationId,
         locationLat: body.lat,
         locationLong: body.long,

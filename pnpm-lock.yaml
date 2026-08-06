@@ -63,6 +63,9 @@ importers:
       qr-scanner:
         specifier: 1.4.2
         version: 1.4.2
+      qrcode:
+        specifier: 1.5.3
+        version: 1.5.3
       react:
         specifier: 18.2.0
         version: 18.2.0
@@ -73,6 +76,9 @@ importers:
         specifier: 4.7.5
         version: 4.7.5
     devDependencies:
+      '@types/qrcode':
+        specifier: 1.5.5
+        version: 1.5.5
       '@types/react':
         specifier: 18.2.66
         version: 18.2.66

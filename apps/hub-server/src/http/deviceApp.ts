@@ -10,6 +10,7 @@ import express from 'express';
 import type { Config } from '../config.js';
 import type { TlsMaterial } from './tls.js';
 import { renderJoinSheetHtml } from './joinSheetPage.js';
+import { renderTestQrHtml } from './testQrPage.js';
 
 export function createDeviceApp(config: Config, tls: TlsMaterial, webDistDir: string) {
   const app = express();
@@ -21,6 +22,10 @@ export function createDeviceApp(config: Config, tls: TlsMaterial, webDistDir: st
 
   app.get('/join-sheet', async (_req, res) => {
     res.status(200).type('html').send(await renderJoinSheetHtml(config));
+  });
+
+  app.get('/test-qr', async (_req, res) => {
+    res.status(200).type('html').send(await renderTestQrHtml());
   });
 
   app.use('/attachments', express.static(join(config.dataDir, 'attachments')));

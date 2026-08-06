@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
+import type { QrCtfPlayer } from '@foundry-ctf/shared';
 
 /** HUB-151: identity persists in localStorage so a refresh/backgrounded browser resumes
  * the same player without re-registering. */
@@ -20,6 +21,50 @@ export function loadPlayerIdentity(): PlayerIdentity | null {
 
 export function savePlayerIdentity(identity: PlayerIdentity): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(identity));
+}
+
+const ONBOARDED_KEY_PREFIX = 'foundry-ctf:onboarded:';
+
+/** Tracks whether a player has completed the one-time "scan your own QR" onboarding step
+ * (OwnQrScreen), per playerId, so a refresh doesn't re-prompt someone who already did it. */
+export function hasCompletedOnboarding(playerId: string): boolean {
+  try {
+    return localStorage.getItem(ONBOARDED_KEY_PREFIX + playerId) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markOnboardingComplete(playerId: string): void {
+  try {
+    localStorage.setItem(ONBOARDED_KEY_PREFIX + playerId, '1');
+  } catch {
+    // ignore - worst case they're asked to scan their own QR again
+  }
+}
+
+const OWN_PLAYER_CACHE_KEY = 'foundry-ctf:own-player-cache';
+
+/** Caches the last-known ownPlayer record so a refresh/reconnect can render the right
+ * screen (gameplay vs. registration) immediately instead of flashing back to
+ * "choose your team" while waiting for the server's state:snapshot to arrive. The real
+ * snapshot always overwrites this once it lands - this is just to avoid the flash. */
+export function loadCachedOwnPlayer(): QrCtfPlayer | null {
+  try {
+    const raw = localStorage.getItem(OWN_PLAYER_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as QrCtfPlayer) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedOwnPlayer(player: QrCtfPlayer | null): void {
+  try {
+    if (player) localStorage.setItem(OWN_PLAYER_CACHE_KEY, JSON.stringify(player));
+    else localStorage.removeItem(OWN_PLAYER_CACHE_KEY);
+  } catch {
+    // ignore - worst case a refresh flashes the registration screen briefly
+  }
 }
 
 let socketSingleton: Socket | null = null;

@@ -13,9 +13,11 @@
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "socket.io-client": "4.7.5",
-    "qr-scanner": "1.4.2"
+    "qr-scanner": "1.4.2",
+    "qrcode": "1.5.3"
   },
   "devDependencies": {
+    "@types/qrcode": "1.5.5",
     "@types/react": "18.2.66",
     "@types/react-dom": "18.2.22",
     "@vitejs/plugin-react": "4.2.1",

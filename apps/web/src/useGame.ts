@@ -5,7 +5,7 @@ import type {
   QrCtfSession,
   QrCtfTeam,
 } from '@foundry-ctf/shared';
-import { getSocket, loadPlayerIdentity, savePlayerIdentity } from './socket';
+import { getSocket, loadPlayerIdentity, savePlayerIdentity, loadCachedOwnPlayer, saveCachedOwnPlayer } from './socket';
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -46,16 +46,19 @@ function applyPatch<T extends Record<string, any>>(list: T[], idKey: string, id:
  * is ever active per tab. */
 export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: string) {
   const socket = useMemo(() => getSocket(), []);
-  const [state, setState] = useState<GameState>({
+  const [state, setState] = useState<GameState>(() => ({
     status: 'connecting',
     teams: [],
     controlPoints: [],
     session: null,
-    ownPlayer: null,
+    // Seeded from the last snapshot so a refresh doesn't flash back to the registration
+    // screen while waiting for the server round-trip - state:snapshot always overwrites
+    // this once it arrives.
+    ownPlayer: role === 'player' ? loadCachedOwnPlayer() : null,
     activeCapture: null,
     lastRejection: null,
     eventLog: [],
-  });
+  }));
   const helloSentRef = useRef(false);
 
   useEffect(() => {
@@ -89,6 +92,7 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     // register the snapshot listener before sending hello (see hub-server WsGateway
     // tests for the same race, documented there in detail).
     function onSnapshot(snap: { teams: QrCtfTeam[]; controlPoints: QrCtfControlPoint[]; session: QrCtfSession | null; ownPlayer?: QrCtfPlayer }) {
+      if (role === 'player') saveCachedOwnPlayer(snap.ownPlayer ?? null);
       setState((s) => ({
         ...s,
         teams: snap.teams,
@@ -105,7 +109,9 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
         if (type === 'qrCtfControlPoint') return { ...s, controlPoints: applyPatch(s.controlPoints, 'controlPointId', id, patch) };
         if (type === 'qrCtfSession') return { ...s, session: patch === null ? null : { ...(s.session ?? ({} as QrCtfSession)), ...(patch as object) } };
         if (type === 'qrCtfPlayer' && s.ownPlayer?.playerId === id) {
-          return { ...s, ownPlayer: patch === null ? null : { ...s.ownPlayer, ...(patch as object) } };
+          const nextOwnPlayer = patch === null ? null : { ...s.ownPlayer, ...(patch as object) };
+          if (role === 'player') saveCachedOwnPlayer(nextOwnPlayer);
+          return { ...s, ownPlayer: nextOwnPlayer };
         }
         return s;
       });
