@@ -62,8 +62,10 @@ export const SCOREBOARD_HTML = `<!doctype html>
     function teamById(id) { return teams.find((t) => t.teamId === id); }
 
     function render() {
+      const teamsWithPlayers = teams.filter((t) => players.some((p) => p.teamId === t.teamId));
+
       const teamsEl = document.getElementById('teams');
-      const sorted = [...teams].sort((a, b) => b.score - a.score);
+      const sorted = [...teamsWithPlayers].sort((a, b) => b.score - a.score);
       teamsEl.innerHTML = sorted.map((t) => \`
         <div class="team-row">
           <div class="swatch" style="background:\${t.hexColor}"></div>
