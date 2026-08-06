@@ -1,0 +1,27 @@
+{
+  "name": "@foundry-ctf/hub-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@foundry-ctf/shared": "workspace:*",
+    "express": "4.19.2",
+    "socket.io": "4.7.5",
+    "zod": "3.23.8",
+    "selfsigned": "2.4.1"
+  },
+  "devDependencies": {
+    "@types/express": "4.17.21",
+    "@types/node": "20.14.2",
+    "typescript": "5.4.5",
+    "tsx": "4.15.6",
+    "vitest": "1.6.0"
+  }
+}
