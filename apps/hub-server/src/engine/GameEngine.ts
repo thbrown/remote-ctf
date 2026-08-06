@@ -78,6 +78,8 @@ export class GameEngine {
   private readonly lastTagAtMonoMsByPair = new Map<string, number>();
   private readonly lastRespawnAtMonoMsByPlayer = new Map<string, number>();
   private readonly capturesCompletedCountByPlayer = new Map<string, number>();
+  private readonly tagsInflictedCountByPlayer = new Map<string, number>();
+  private readonly tagsReceivedCountByPlayer = new Map<string, number>();
 
   private unsubscribeStore: (() => void) | null = null;
 
@@ -162,6 +164,8 @@ export class GameEngine {
     this.lastTagAtMonoMsByPair.clear();
     this.lastRespawnAtMonoMsByPlayer.clear();
     this.capturesCompletedCountByPlayer.clear();
+    this.tagsInflictedCountByPlayer.clear();
+    this.tagsReceivedCountByPlayer.clear();
   }
 
   /** HUB-165. */
@@ -557,11 +561,22 @@ export class GameEngine {
     if (targetTeam) await this.store.teams.update(targetTeamId, { totalTagsReceived: targetTeam.totalTagsReceived + 1 });
   }
 
+  /** Appends cumulative running totals (like capturesCompletedCountByPlayer), not raw
+   * per-event deltas, so a stats reader can cheaply get a player's current total via
+   * TimeSeriesStore.latest() instead of summing the whole series every read. */
   private async appendPlayerTagSeries(sourcePlayerId: string, targetPlayerId: string, sessionId: string): Promise<void> {
     const sourcePs = (await this.store.playerSessions.list({ sessionId, playerId: sourcePlayerId } as any))[0] as any;
-    if (sourcePs) await this.store.series.append(sourcePs.tagsInflictedSeriesId, { t: Date.now(), v: 1 });
+    if (sourcePs) {
+      const nextInflicted = (this.tagsInflictedCountByPlayer.get(sourcePlayerId) ?? 0) + 1;
+      this.tagsInflictedCountByPlayer.set(sourcePlayerId, nextInflicted);
+      await this.store.series.append(sourcePs.tagsInflictedSeriesId, { t: Date.now(), v: nextInflicted });
+    }
     const targetPs = (await this.store.playerSessions.list({ sessionId, playerId: targetPlayerId } as any))[0] as any;
-    if (targetPs) await this.store.series.append(targetPs.tagsReceivedSeriesId, { t: Date.now(), v: 1 });
+    if (targetPs) {
+      const nextReceived = (this.tagsReceivedCountByPlayer.get(targetPlayerId) ?? 0) + 1;
+      this.tagsReceivedCountByPlayer.set(targetPlayerId, nextReceived);
+      await this.store.series.append(targetPs.tagsReceivedSeriesId, { t: Date.now(), v: nextReceived });
+    }
   }
 
   // ---- Respawn (HUB-120..124) ----

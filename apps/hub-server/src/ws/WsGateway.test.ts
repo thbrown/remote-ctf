@@ -318,4 +318,54 @@ describe('WsGateway', () => {
     expect(row.qrCodeToken).toBeUndefined();
     expect(row.playerSecret).toBeUndefined();
   });
+
+  it('admin:players:list reports isConnected, flipping to false after disconnect', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+
+    const before = await new Promise<any>((resolve) => admin.emit('admin:players:list', {}, resolve));
+    expect(before.players.find((p: any) => p.playerId === helloAck.playerId).isConnected).toBe(true);
+
+    player.disconnect();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const after = await new Promise<any>((resolve) => admin.emit('admin:players:list', {}, resolve));
+    expect(after.players.find((p: any) => p.playerId === helloAck.playerId).isConnected).toBe(false);
+  });
+
+  it('admin/spectator players:list report per-player tag/capture stats for the current session', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(helloAck.playerId, { teamId: TEAM_A } as any);
+
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+    const startAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:session:start', { sessionName: 'R1', activeTeamIds: [TEAM_A, TEAM_B] }, resolve),
+    );
+    expect(startAck.ok).toBe(true);
+
+    const [playerSession] = await store.playerSessions.list({ sessionId: startAck.sessionId, playerId: helloAck.playerId } as any);
+    expect(playerSession).toBeTruthy();
+    await store.series.append((playerSession as any).tagsInflictedSeriesId, { t: Date.now(), v: 3 });
+    await store.series.append((playerSession as any).tagsReceivedSeriesId, { t: Date.now(), v: 1 });
+    await store.series.append((playerSession as any).capturesCompletedSeriesId, { t: Date.now(), v: 2 });
+
+    const adminRoster = await new Promise<any>((resolve) => admin.emit('admin:players:list', {}, resolve));
+    expect(adminRoster.players.find((p: any) => p.playerId === helloAck.playerId)).toMatchObject({
+      tagsInflicted: 3,
+      tagsReceived: 1,
+      capturesCompleted: 2,
+    });
+
+    const spectator = connect();
+    await new Promise<any>((resolve) => spectator.emit('session:hello', { role: 'spectator' }, resolve));
+    const spectatorRoster = await new Promise<any>((resolve) => spectator.emit('spectator:players:list', {}, resolve));
+    const spectatorRow = spectatorRoster.players.find((p: any) => p.playerId === helloAck.playerId);
+    expect(spectatorRow).toMatchObject({ tagsInflicted: 3, tagsReceived: 1, capturesCompleted: 2 });
+    expect(spectatorRow.qrCodeToken).toBeUndefined();
+  });
 });

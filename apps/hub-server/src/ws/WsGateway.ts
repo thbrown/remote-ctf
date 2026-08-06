@@ -56,8 +56,44 @@ interface SocketState {
 export function createWsGateway(deps: WsGatewayDeps): () => void {
   const { io, store, engine, config, stationId, dispatcher, registry } = deps;
 
+  // Live connection tracking for players, keyed by playerId -> the set of socket ids
+  // currently connected as that player. A Set (not a boolean) because a reconnect or a
+  // second tab can briefly/deliberately hold two sockets for the same playerId - the
+  // player only counts as disconnected once every socket for them has gone. Unlike
+  // NodeRegistry's heartbeat-timeout approach (nodes have no persistent connection to
+  // hook into), players already have a live socket.io connection, so connect/disconnect
+  // events are the natural signal here.
+  const connectedSocketIdsByPlayerId = new Map<string, Set<string>>();
+
+  async function getPlayerStats(
+    playerId: string,
+    sessionId: string | null,
+  ): Promise<{ tagsInflicted: number; tagsReceived: number; capturesCompleted: number }> {
+    if (!sessionId) return { tagsInflicted: 0, tagsReceived: 0, capturesCompleted: 0 };
+    const ps = (await store.playerSessions.list({ sessionId, playerId } as any))[0] as any;
+    if (!ps) return { tagsInflicted: 0, tagsReceived: 0, capturesCompleted: 0 };
+    const [tagsInflictedPoint, tagsReceivedPoint, capturesPoint] = await Promise.all([
+      store.series.latest(ps.tagsInflictedSeriesId),
+      store.series.latest(ps.tagsReceivedSeriesId),
+      store.series.latest(ps.capturesCompletedSeriesId),
+    ]);
+    return {
+      tagsInflicted: (tagsInflictedPoint as any)?.v ?? 0,
+      tagsReceived: (tagsReceivedPoint as any)?.v ?? 0,
+      capturesCompleted: (capturesPoint as any)?.v ?? 0,
+    };
+  }
+
   io.on('connection', (socket: Socket) => {
     const state: SocketState = { role: null, playerId: null };
+
+    socket.on('disconnect', () => {
+      if (!state.playerId) return;
+      const set = connectedSocketIdsByPlayerId.get(state.playerId);
+      if (!set) return;
+      set.delete(socket.id);
+      if (set.size === 0) connectedSocketIdsByPlayerId.delete(state.playerId);
+    });
 
     socket.on('session:hello', async (raw: unknown, ack?: (res: unknown) => void) => {
       const parsed = SessionHelloSchema.safeParse(raw);
@@ -106,6 +142,9 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
           state.playerId = created.playerId;
         }
         void socket.join(`player:${state.playerId}`);
+        const set = connectedSocketIdsByPlayerId.get(state.playerId!) ?? new Set<string>();
+        set.add(socket.id);
+        connectedSocketIdsByPlayerId.set(state.playerId!, set);
         const player = await store.players.get(state.playerId!);
         ack?.({ ok: true, playerId: state.playerId, playerSecret: (player as any).playerSecret });
       }
@@ -287,31 +326,43 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
     socket.on('admin:players:list', async (_raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'admin') return;
       const players = await store.players.list({ stationId } as any);
+      const station = await store.stations.get(stationId);
+      const sessionId = (station as any)?.currentSessionId ?? null;
       // playerSecret is a login credential, never send it over the wire to anyone but the
       // owning player themselves (already done via ownPlayer in state:snapshot).
-      const roster = players.map((p: any) => ({
-        playerId: p.playerId,
-        playerName: p.playerName,
-        teamId: p.teamId,
-        playerStatus: p.playerStatus,
-        qrCodeToken: p.qrCodeToken,
-        qrCodeClaimed: p.qrCodeClaimed,
-      }));
+      const roster = await Promise.all(
+        players.map(async (p: any) => ({
+          playerId: p.playerId,
+          playerName: p.playerName,
+          teamId: p.teamId,
+          playerStatus: p.playerStatus,
+          qrCodeToken: p.qrCodeToken,
+          qrCodeClaimed: p.qrCodeClaimed,
+          isConnected: (connectedSocketIdsByPlayerId.get(p.playerId)?.size ?? 0) > 0,
+          ...(await getPlayerStats(p.playerId, sessionId)),
+        })),
+      );
       ack?.({ ok: true, players: roster });
     });
 
-    // HUB-094-style redaction: the public no-auth scoreboard gets name/team/status only -
-    // never qrCodeToken (would let anyone forge a tag) or playerSecret (identity theft) or
-    // location.
+    // HUB-094-style redaction: the public no-auth scoreboard gets name/team/status/stats
+    // only - never qrCodeToken (would let anyone forge a tag) or playerSecret (identity
+    // theft) or location.
     socket.on('spectator:players:list', async (_raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'spectator') return;
       const players = await store.players.list({ stationId } as any);
-      const roster = players.map((p: any) => ({
-        playerId: p.playerId,
-        playerName: p.playerName,
-        teamId: p.teamId,
-        playerStatus: p.playerStatus,
-      }));
+      const station = await store.stations.get(stationId);
+      const sessionId = (station as any)?.currentSessionId ?? null;
+      const roster = await Promise.all(
+        players.map(async (p: any) => ({
+          playerId: p.playerId,
+          playerName: p.playerName,
+          teamId: p.teamId,
+          playerStatus: p.playerStatus,
+          isConnected: (connectedSocketIdsByPlayerId.get(p.playerId)?.size ?? 0) > 0,
+          ...(await getPlayerStats(p.playerId, sessionId)),
+        })),
+      );
       ack?.({ ok: true, players: roster });
     });
 

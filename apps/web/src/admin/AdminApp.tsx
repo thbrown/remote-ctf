@@ -27,6 +27,10 @@ interface PlayerRow {
   playerStatus: string;
   qrCodeToken: string;
   qrCodeClaimed: boolean;
+  isConnected: boolean;
+  tagsInflicted: number;
+  tagsReceived: number;
+  capturesCompleted: number;
 }
 
 export function AdminApp() {
@@ -174,33 +178,45 @@ export function AdminApp() {
 
       <section>
         <h2>Players</h2>
-        <table>
-          <thead>
-            <tr><th>Name</th><th>Team</th><th>Status</th><th>QR code ID</th><th>Badge</th></tr>
-          </thead>
-          <tbody>
-            {players.map((p) => {
-              const team = p.teamId ? state.teams.find((t) => t.teamId === p.teamId) : null;
-              return (
-                <tr key={p.playerId}>
-                  <td>{p.playerName}</td>
-                  <td>
-                    {team ? (
-                      <>
-                        <span className="swatch" style={{ background: team.hexColor }} /> {team.teamName}
-                      </>
-                    ) : (
-                      '— (not yet joined a team)'
-                    )}
-                  </td>
-                  <td>{p.playerStatus}</td>
-                  <td>{p.qrCodeClaimed ? p.qrCodeToken : 'unclaimed'}</td>
-                  <td>{p.qrCodeClaimed && <QrThumbnail value={encodePlQr(p.qrCodeToken)} size={64} />}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th><th>Team</th><th>Status</th><th>Connected</th>
+                <th>Tags for</th><th>Tags against</th><th>K/D</th><th>Points captured</th>
+                <th>QR code ID</th><th>Badge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {players.map((p) => {
+                const team = p.teamId ? state.teams.find((t) => t.teamId === p.teamId) : null;
+                const kd = p.tagsReceived === 0 ? (p.tagsInflicted === 0 ? '—' : '∞') : (p.tagsInflicted / p.tagsReceived).toFixed(2);
+                return (
+                  <tr key={p.playerId} className={p.isConnected ? '' : 'player-row-disconnected'}>
+                    <td>{p.playerName}</td>
+                    <td>
+                      {team ? (
+                        <>
+                          <span className="swatch" style={{ background: team.hexColor }} /> {team.teamName}
+                        </>
+                      ) : (
+                        '— (not yet joined a team)'
+                      )}
+                    </td>
+                    <td>{p.playerStatus}</td>
+                    <td>{p.isConnected ? 'connected' : 'disconnected'}</td>
+                    <td>{p.tagsInflicted}</td>
+                    <td>{p.tagsReceived}</td>
+                    <td>{kd}</td>
+                    <td>{p.capturesCompleted}</td>
+                    <td>{p.qrCodeClaimed ? p.qrCodeToken : 'unclaimed'}</td>
+                    <td>{p.qrCodeClaimed && <QrThumbnail value={encodePlQr(p.qrCodeToken)} size={64} />}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section>

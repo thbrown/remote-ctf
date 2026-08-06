@@ -32,12 +32,13 @@ export const SCOREBOARD_HTML = `<!doctype html>
   .cp-name { font-size: 1.1rem; opacity: 0.8; margin-bottom: 8px; }
   .cp-owner { font-size: 1.4rem; font-weight: 700; }
   h2 { font-size: 1.3rem; opacity: 0.8; margin: 0 0 12px; }
-  #players { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 32px; }
-  .player-card { background: #1c1f26; border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; font-size: 1.1rem; }
-  .player-card .swatch { width: 20px; height: 20px; border-radius: 5px; flex: none; }
-  .player-name { flex: 1; }
-  .player-status { font-size: 0.85rem; opacity: 0.7; }
-  .player-status.tagged_out { color: #ff8080; opacity: 1; }
+  #players-wrap { overflow-x: auto; margin-bottom: 32px; }
+  #players { width: 100%; border-collapse: collapse; font-size: 1.05rem; }
+  #players th, #players td { text-align: left; padding: 8px 14px; border-bottom: 1px solid #262a33; white-space: nowrap; }
+  #players th { font-size: 0.85rem; opacity: 0.7; font-weight: 600; text-transform: uppercase; }
+  #players .player-name-cell { display: flex; align-items: center; gap: 10px; }
+  .player-status.tagged_out { color: #ff8080; }
+  .player-row-disconnected { opacity: 0.4; font-style: italic; }
   #ticker { font-size: 1.1rem; opacity: 0.85; line-height: 1.6; max-height: 200px; overflow-y: auto; }
   #ticker div { border-left: 3px solid #444; padding-left: 10px; margin-bottom: 6px; }
 </style>
@@ -48,7 +49,17 @@ export const SCOREBOARD_HTML = `<!doctype html>
   <div id="teams"></div>
   <div id="cps"></div>
   <h2>Players</h2>
-  <div id="players"></div>
+  <div id="players-wrap">
+    <table id="players">
+      <thead>
+        <tr>
+          <th>Player</th><th>Team</th><th>Status</th>
+          <th>Tags for</th><th>Tags against</th><th>K/D</th><th>Points captured</th>
+        </tr>
+      </thead>
+      <tbody id="players-body"></tbody>
+    </table>
+  </div>
   <div id="ticker"></div>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -84,16 +95,26 @@ export const SCOREBOARD_HTML = `<!doctype html>
         </div>\`;
       }).join('');
 
-      const playersEl = document.getElementById('players');
+      const playersBodyEl = document.getElementById('players-body');
       const sortedPlayers = [...players].sort((a, b) => a.playerName.localeCompare(b.playerName));
-      playersEl.innerHTML = sortedPlayers.map((p) => {
+      playersBodyEl.innerHTML = sortedPlayers.map((p) => {
         const team = p.teamId ? teamById(p.teamId) : null;
+        const kd = p.tagsReceived === 0 ? (p.tagsInflicted === 0 ? '—' : '∞') : (p.tagsInflicted / p.tagsReceived).toFixed(2);
         return \`
-        <div class="player-card">
-          <div class="swatch" style="background:\${team ? team.hexColor : '#555'}"></div>
-          <div class="player-name">\${p.playerName}</div>
-          <div class="player-status \${p.playerStatus}">\${p.playerStatus.replace(/_/g, ' ')}</div>
-        </div>\`;
+        <tr class="\${p.isConnected ? '' : 'player-row-disconnected'}">
+          <td>
+            <div class="player-name-cell">
+              <div class="swatch" style="background:\${team ? team.hexColor : '#555'}"></div>
+              \${p.playerName}\${p.isConnected ? '' : ' (disconnected)'}
+            </div>
+          </td>
+          <td>\${team ? team.teamName : '—'}</td>
+          <td class="player-status \${p.playerStatus}">\${p.playerStatus.replace(/_/g, ' ')}</td>
+          <td>\${p.tagsInflicted}</td>
+          <td>\${p.tagsReceived}</td>
+          <td>\${kd}</td>
+          <td>\${p.capturesCompleted}</td>
+        </tr>\`;
       }).join('');
 
       document.getElementById('timer').textContent = session
