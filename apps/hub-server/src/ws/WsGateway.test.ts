@@ -215,4 +215,25 @@ describe('WsGateway', () => {
     const cps = await store.controlPoints.list({ macAddress: 'AA:BB:CC:DD:EE:99' } as any);
     expect(cps[0].controlPointName).toBe('North Gate');
   });
+
+  it('admin respawn location create/list/delete round trip', async () => {
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+
+    const createAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:respawnLocation:create', { lat: 10, long: 20, allowedTeamIds: [TEAM_A] }, resolve),
+    );
+    expect(createAck.ok).toBe(true);
+
+    const listAck = await new Promise<any>((resolve) => admin.emit('admin:respawnLocation:list', {}, resolve));
+    expect(listAck.locations).toHaveLength(1);
+    expect(listAck.locations[0].allowedTeamIds).toEqual([TEAM_A]);
+
+    const deleteAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:respawnLocation:delete', { respawnLocationId: createAck.respawnLocationId }, resolve),
+    );
+    expect(deleteAck.ok).toBe(true);
+    const afterDelete = await store.respawnLocations.list();
+    expect(afterDelete).toHaveLength(0);
+  });
 });

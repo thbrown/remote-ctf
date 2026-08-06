@@ -5,10 +5,11 @@
  * client->server handler below checks `role` first and silently drops anything from a
  * spectator (they're simply never given a role that passes those checks).
  *
- * Admin surface implemented in this pass: session start/stop, Node claim, Node identify.
- * Respawn-location CRUD, player roster actions (rename/regenerate token/force-respawn),
- * and Node rename/delete are NOT yet implemented — see PROGRESS.md gap list. The Web App
- * (Task #10) should only wire buttons for what exists here until that's filled in.
+ * Admin surface implemented in this pass: session start/stop, Node claim, Node identify,
+ * Node list, Respawn Location create/list/delete. Player roster actions
+ * (rename/regenerate token/force-respawn) and Node rename/delete are NOT yet implemented —
+ * see PROGRESS.md gap list. The Web App should only wire buttons for what exists here
+ * until that's filled in.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
@@ -201,6 +202,36 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       const record = registry.get(mac);
       if (record) dispatcher.pushSetColor(mac, record.ip, (station as any)?.neutralHexColor ?? '#FFFFFF', 'solid');
       ack?.({ ok: true, controlPointId: cp.controlPointId });
+    });
+
+    socket.on('admin:respawnLocation:create', async (raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'admin') return;
+      const body = (raw ?? {}) as { lat?: number; long?: number; allowedTeamIds?: string[] };
+      if (typeof body.lat !== 'number' || typeof body.long !== 'number') {
+        ack?.({ ok: false, error: 'lat/long required' });
+        return;
+      }
+      const location = await store.respawnLocations.create({
+        respawnLocationId: randomUUID(),
+        stationId,
+        locationLat: body.lat,
+        locationLong: body.long,
+        allowedTeamIds: body.allowedTeamIds ?? [], // empty = any team, HUB-120
+      } as any);
+      ack?.({ ok: true, respawnLocationId: location.respawnLocationId });
+    });
+
+    socket.on('admin:respawnLocation:list', async (_raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'admin') return;
+      const locations = await store.respawnLocations.list({ stationId } as any);
+      ack?.({ ok: true, locations });
+    });
+
+    socket.on('admin:respawnLocation:delete', async (raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'admin') return;
+      const body = (raw ?? {}) as { respawnLocationId?: string };
+      if (body.respawnLocationId) await store.respawnLocations.delete(body.respawnLocationId);
+      ack?.({ ok: true });
     });
 
     socket.on('admin:nodes:list', (_raw: unknown, ack?: (res: unknown) => void) => {

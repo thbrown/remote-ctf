@@ -11,6 +11,13 @@ interface NodeRow {
   rssi: number | null;
 }
 
+interface RespawnLocationRow {
+  respawnLocationId: string;
+  locationLat: number;
+  locationLong: number;
+  allowedTeamIds: string[];
+}
+
 export function AdminApp() {
   const [pin, setPin] = useState('');
   const [pinSubmitted, setPinSubmitted] = useState(false);
@@ -21,15 +28,27 @@ export function AdminApp() {
   const [nodes, setNodes] = useState<NodeRow[]>([]);
   const [claimMac, setClaimMac] = useState('');
   const [claimName, setClaimName] = useState('');
+  const [respawnLocations, setRespawnLocations] = useState<RespawnLocationRow[]>([]);
+  const [rpLat, setRpLat] = useState('');
+  const [rpLong, setRpLong] = useState('');
+  const [rpTeamIds, setRpTeamIds] = useState<string[]>([]);
+
+  function refreshRespawnLocations() {
+    socket.emit('admin:respawnLocation:list', {}, (res: any) => {
+      if (res?.ok) setRespawnLocations(res.locations);
+    });
+  }
 
   useEffect(() => {
     if (state.status !== 'connected' || !pinSubmitted) return;
+    refreshRespawnLocations();
     const interval = setInterval(() => {
       socket.emit('admin:nodes:list', {}, (res: any) => {
         if (res?.ok) setNodes(res.nodes);
       });
     }, 3000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, state.status, pinSubmitted]);
 
   if (!pinSubmitted) {
@@ -68,6 +87,32 @@ export function AdminApp() {
 
   function identifyNode(mac: string) {
     socket.emit('admin:node:identify', { macAddress: mac }, () => {});
+  }
+
+  function toggleRpTeam(teamId: string) {
+    setRpTeamIds((ids) => (ids.includes(teamId) ? ids.filter((id) => id !== teamId) : [...ids, teamId]));
+  }
+
+  function createRespawnLocation() {
+    const lat = Number(rpLat);
+    const long = Number(rpLong);
+    if (!Number.isFinite(lat) || !Number.isFinite(long)) {
+      alert('lat/long must be numbers');
+      return;
+    }
+    socket.emit('admin:respawnLocation:create', { lat, long, allowedTeamIds: rpTeamIds }, (res: any) => {
+      if (!res?.ok) alert(`Failed: ${res?.error}`);
+      else {
+        setRpLat('');
+        setRpLong('');
+        setRpTeamIds([]);
+        refreshRespawnLocations();
+      }
+    });
+  }
+
+  function deleteRespawnLocation(respawnLocationId: string) {
+    socket.emit('admin:respawnLocation:delete', { respawnLocationId }, () => refreshRespawnLocations());
   }
 
   return (
@@ -171,6 +216,42 @@ export function AdminApp() {
             ))}
           </tbody>
         </table>
+      </section>
+
+      <section>
+        <h2>Respawn Locations</h2>
+        <div className="claim-form">
+          <input value={rpLat} onChange={(e) => setRpLat(e.target.value)} placeholder="Latitude" />
+          <input value={rpLong} onChange={(e) => setRpLong(e.target.value)} placeholder="Longitude" />
+        </div>
+        <div className="team-toggle-list">
+          <span>Allowed teams (none checked = any team):</span>
+          {state.teams.map((t) => (
+            <label key={t.teamId} className="team-toggle">
+              <input type="checkbox" checked={rpTeamIds.includes(t.teamId)} onChange={() => toggleRpTeam(t.teamId)} />
+              <span className="swatch" style={{ background: t.hexColor }} />
+              {t.teamName}
+            </label>
+          ))}
+        </div>
+        <button onClick={createRespawnLocation}>Add respawn location</button>
+        <table>
+          <thead><tr><th>Lat</th><th>Long</th><th>Allowed teams</th><th></th></tr></thead>
+          <tbody>
+            {respawnLocations.map((rp) => (
+              <tr key={rp.respawnLocationId}>
+                <td>{rp.locationLat}</td>
+                <td>{rp.locationLong}</td>
+                <td>{rp.allowedTeamIds.length === 0 ? 'any' : rp.allowedTeamIds.map((id) => state.teams.find((t) => t.teamId === id)?.teamName ?? id).join(', ')}</td>
+                <td><button onClick={() => deleteRespawnLocation(rp.respawnLocationId)}>Delete</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <a href="/join-sheet" target="_blank" rel="noreferrer">Print Join Sheet</a>
       </section>
 
       <section>
