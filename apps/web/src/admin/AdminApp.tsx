@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { encodePlQr, encodeRpQr, isQrParseError, parseQr } from '@foundry-ctf/shared';
 import { useGame } from '../useGame';
 import { AdminQrScanner } from './AdminQrScanner';
@@ -58,6 +58,17 @@ function AdminLogin({
       {authError && <div className="form-error">Incorrect PIN — try again.</div>}
       <button onClick={onSubmit}>Enter</button>
     </div>
+  );
+}
+
+type SectionTone = 'session' | 'players' | 'nodes' | 'respawn' | 'resources' | 'log';
+
+function AdminSection({ title, tone, children }: { title: string; tone: SectionTone; children: ReactNode }) {
+  return (
+    <section className={`admin-section admin-section-${tone}`}>
+      <h2>{title}</h2>
+      {children}
+    </section>
   );
 }
 
@@ -257,38 +268,34 @@ export function AdminApp() {
     <div className="admin-app">
       <h1>Admin</h1>
       <div className="status-line">
-        Connection: {state.status} · Session: {state.session ? state.session.sessionName : 'none running'}
+        <span className="status-pill">Connection: {state.status}</span>
+        <span className="status-pill">Session: {state.session ? state.session.sessionName : 'none running'}</span>
       </div>
 
-      <div className="admin-group admin-group-session">
-        <section>
-          <h2>Session</h2>
-          {state.session ? (
-            <button onClick={stopSession}>Stop session</button>
-          ) : (
-            <>
-              <input value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="Session name" />
-              <div className="team-toggle-list">
-                <span>Teams with players joined (these will be active):</span>
-                {teamsWithPlayers.length === 0 && <span>— none yet</span>}
-                {teamsWithPlayers.map((t) => (
-                  <span key={t.teamId} className="team-toggle">
-                    <span className="swatch" style={{ background: t.hexColor }} />
-                    {t.teamName}
-                  </span>
-                ))}
-              </div>
-              <button onClick={startSession} disabled={teamsWithPlayers.length < 2}>
-                Start session
-              </button>
-            </>
-          )}
-        </section>
-      </div>
+      <AdminSection title="Session" tone="session">
+        {state.session ? (
+          <button className="btn-danger" onClick={stopSession}>Stop session</button>
+        ) : (
+          <>
+            <input value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="Session name" />
+            <div className="team-toggle-list">
+              <span>Teams with players joined (these will be active):</span>
+              {teamsWithPlayers.length === 0 && <span>— none yet</span>}
+              {teamsWithPlayers.map((t) => (
+                <span key={t.teamId} className="team-toggle">
+                  <span className="swatch" style={{ background: t.hexColor }} />
+                  {t.teamName}
+                </span>
+              ))}
+            </div>
+            <button onClick={startSession} disabled={teamsWithPlayers.length < 2}>
+              Start session
+            </button>
+          </>
+        )}
+      </AdminSection>
 
-      <div className="admin-group admin-group-game">
-      <section>
-        <h2>Players</h2>
+      <AdminSection title="Players" tone="players">
         <div className="table-scroll">
           <table>
             <thead>
@@ -338,17 +345,16 @@ export function AdminApp() {
                       </div>
                     </td>
                     <td>{p.qrCodeClaimed && <QrThumbnail value={encodePlQr(p.qrCodeToken)} size={64} />}</td>
-                    <td><button onClick={() => removePlayer(p.playerId, p.playerName)}>Remove</button></td>
+                    <td><button className="btn-danger" onClick={() => removePlayer(p.playerId, p.playerName)}>Remove</button></td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
-      </section>
+      </AdminSection>
 
-      <section>
-        <h2>Control Points</h2>
+      <AdminSection title="Control Points" tone="nodes">
         <table>
           <thead>
             <tr><th>Name</th><th>MAC</th><th>Owner</th><th>Presence</th></tr>
@@ -372,7 +378,7 @@ export function AdminApp() {
         <div className="claim-form">
           <input value={claimMac} onChange={(e) => setClaimMac(e.target.value)} placeholder="MAC address (AA:BB:CC:DD:EE:FF)" />
           <input value={claimName} onChange={(e) => setClaimName(e.target.value)} placeholder="Control Point name" />
-          <button onClick={() => setScanning('cp')}>Scan QR</button>
+          <button className="btn-ghost" onClick={() => setScanning('cp')}>Scan QR</button>
           <button onClick={claimNode}>Claim</button>
         </div>
         <table>
@@ -389,15 +395,15 @@ export function AdminApp() {
                 <td><span className="swatch" style={{ background: n.desiredColor }} /></td>
                 <td>{n.reportedColor && <span className="swatch" style={{ background: n.reportedColor }} />}</td>
                 <td>{n.rssi ?? '—'}</td>
-                <td><button onClick={() => identifyNode(n.mac)}>Identify</button></td>
+                <td><button className="btn-ghost" onClick={() => identifyNode(n.mac)}>Identify</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-      </section>
+      </AdminSection>
 
-      <section>
-        <h2>Respawn Points</h2>
+      <AdminSection title="Respawn Points" tone="respawn">
+        <h3>Add a respawn location</h3>
         <div className="claim-form">
           <input value={rpLat} onChange={(e) => setRpLat(e.target.value)} placeholder="Latitude" />
           <input value={rpLong} onChange={(e) => setRpLong(e.target.value)} placeholder="Longitude" />
@@ -406,7 +412,7 @@ export function AdminApp() {
             onChange={(e) => setRpCustomId(e.target.value)}
             placeholder="Custom ID (optional, e.g. to match a pre-printed test QR)"
           />
-          <button onClick={() => setScanning('rp')}>Scan QR</button>
+          <button className="btn-ghost" onClick={() => setScanning('rp')}>Scan QR</button>
         </div>
         <div className="team-toggle-list">
           <span>Allowed teams (none checked = any team):</span>
@@ -428,29 +434,24 @@ export function AdminApp() {
                 <td>{rp.locationLat}</td>
                 <td>{rp.locationLong}</td>
                 <td>{rp.allowedTeamIds.length === 0 ? 'any' : rp.allowedTeamIds.map((id) => state.teams.find((t) => t.teamId === id)?.teamName ?? id).join(', ')}</td>
-                <td><button onClick={() => deleteRespawnLocation(rp.respawnLocationId)}>Delete</button></td>
+                <td><button className="btn-danger" onClick={() => deleteRespawnLocation(rp.respawnLocationId)}>Delete</button></td>
               </tr>
             ))}
           </tbody>
         </table>
-      </section>
-      </div>
+      </AdminSection>
 
-      <section>
-        <h2>Resources</h2>
+      <AdminSection title="Resources" tone="resources">
         <a href="/join-sheet" target="_blank" rel="noreferrer">Print Join Sheet</a>
         {' · '}
         <a href="/test-qr" target="_blank" rel="noreferrer">Test QR Codes</a>
-      </section>
+      </AdminSection>
 
-      <div className="admin-group admin-group-log">
-        <section>
-          <h2>Event log</h2>
-          <div className="event-log">
-            {state.eventLog.map((line, i) => <div key={i}>{line}</div>)}
-          </div>
-        </section>
-      </div>
+      <AdminSection title="Event log" tone="log">
+        <div className="event-log">
+          {state.eventLog.map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+      </AdminSection>
     </div>
   );
 }

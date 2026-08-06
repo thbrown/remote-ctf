@@ -87,19 +87,28 @@ input {
 
 .admin-app { padding: 20px; max-width: 1100px; margin: 0 auto; }
 .admin-login { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 20px; }
-.admin-app section { margin-bottom: 28px; }
-.admin-app section:last-child { margin-bottom: 0; }
 
-.admin-group {
+.status-line { display: flex; gap: 8px; margin-bottom: 20px; }
+.status-pill { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 12px; background: #1c1f26; font-size: 0.85rem; }
+
+.admin-section {
   background: #12141a;
   border: 1px solid #262a35;
   border-radius: 12px;
-  padding: 4px 20px 20px;
-  margin-bottom: 24px;
+  padding: 4px 20px 16px;
+  margin-bottom: 20px;
 }
-.admin-group-session { border-left: 4px solid #3a48ea; }
-.admin-group-game { border-left: 4px solid #2a9d5c; }
-.admin-group-log { border-left: 4px solid #cc8a2a; }
+.admin-section:last-child { margin-bottom: 0; }
+.admin-section h3 { font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; margin: 16px 0 8px; }
+.admin-section-session { border-left: 4px solid #3a48ea; }
+.admin-section-players { border-left: 4px solid #2a9d5c; }
+.admin-section-nodes { border-left: 4px solid #2a9d5c; }
+.admin-section-respawn { border-left: 4px solid #2a9d5c; }
+.admin-section-resources { border-left: 4px solid #8f5ae0; }
+.admin-section-log { border-left: 4px solid #cc8a2a; }
+
+button.btn-danger { background: #a33; }
+button.btn-ghost { background: transparent; border: 1px solid #444; color: #f2f2f2; }
 
 .qr-edit { display: flex; gap: 6px; align-items: center; }
 .qr-edit input { min-height: 36px; padding: 4px 8px; width: 130px; }
@@ -109,8 +118,8 @@ input {
 .claim-form { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .qr-thumbnail { background: white; border-radius: 4px; display: block; }
 .table-scroll { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #333; }
 .player-row-disconnected { opacity: 0.45; }
 .player-row-disconnected td { font-style: italic; }
 .avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: block; }
