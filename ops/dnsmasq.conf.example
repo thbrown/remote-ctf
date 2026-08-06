@@ -1,0 +1,12 @@
+# Append to /etc/dnsmasq.conf (or drop in /etc/dnsmasq.d/foundry-ctf.conf).
+# See ops/raspberry-pi-ap-setup.md.
+
+interface=wlan0
+bind-interfaces
+dhcp-range=10.0.0.2,10.0.0.200,255.255.255.0,24h
+
+# Hand out the Pi itself as the only DNS server, and answer every lookup with
+# the Pi's own address so phones land on the join page / captive portal no
+# matter what host they try to resolve (there is no real internet DNS here).
+dhcp-option=6,10.0.0.1
+address=/#/10.0.0.1

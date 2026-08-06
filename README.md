@@ -85,9 +85,9 @@ for the full list and defaults). The ones you're most likely to set for a real d
 ## Running on the Raspberry Pi
 
 1. Install Node.js >= 20 and pnpm on the Pi (`corepack enable` after Node is installed).
-2. Configure the Pi as a Wi-Fi access point (hostapd/dnsmasq or equivalent) so player
-   phones can join a LAN with no internet — this is outside this repo's scope and isn't
-   automated yet (see `ops/`, currently empty).
+2. Configure the Pi as a Wi-Fi access point so player phones can join a LAN with no
+   internet, following [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)
+   (hostapd + dnsmasq, static IP `10.0.0.1` to match the Hub's default `PUBLIC_ORIGIN`).
 3. Clone this repo onto the Pi and run `pnpm install`.
 4. Build the web app: `pnpm --filter @foundry-ctf/web build`.
 5. Build the server: `pnpm --filter @foundry-ctf/hub-server build`.
