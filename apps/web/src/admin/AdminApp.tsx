@@ -150,14 +150,10 @@ export function AdminApp() {
   }
 
   function removePlayer(playerId: string, playerName: string) {
-    if (!confirm(`Remove ${playerName}? This only works if they haven't played in a session yet.`)) return;
+    if (!confirm(`Remove ${playerName} from this station?`)) return;
     socket.emit('admin:player:remove', { playerId }, (res: any) => {
       if (!res?.ok) {
-        const message =
-          res?.error === 'player_has_session_history'
-            ? "Can't remove - this player has already played in a session (would orphan their history)."
-            : res?.error;
-        alert(`Failed to remove player: ${message}`);
+        alert(`Failed to remove player: ${res?.error}`);
         return;
       }
       setPlayers((ps) => ps.filter((p) => p.playerId !== playerId));

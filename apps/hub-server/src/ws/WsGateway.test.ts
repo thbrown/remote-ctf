@@ -406,7 +406,7 @@ describe('WsGateway', () => {
     expect(await store.players.get(helloAck.playerId)).toBeNull();
   });
 
-  it('admin:player:remove refuses to delete a player who has already played a session', async () => {
+  it('admin:player:remove deletes a player even after they have played a session (roster removal, not history erasure)', async () => {
     const player = connect();
     const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
     await store.players.update(helloAck.playerId, { teamId: TEAM_A } as any);
@@ -414,14 +414,21 @@ describe('WsGateway', () => {
 
     const admin = connect();
     await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
-    await new Promise<any>((resolve) => admin.emit('admin:session:start', { sessionName: 'R1' }, resolve));
+    const startAck = await new Promise<any>((resolve) => admin.emit('admin:session:start', { sessionName: 'R1' }, resolve));
 
     const removeAck = await new Promise<any>((resolve) =>
       admin.emit('admin:player:remove', { playerId: helloAck.playerId }, resolve),
     );
-    expect(removeAck.ok).toBe(false);
-    expect(removeAck.error).toBe('player_has_session_history');
-    expect(await store.players.get(helloAck.playerId)).not.toBeNull();
+    expect(removeAck.ok).toBe(true);
+    expect(await store.players.get(helloAck.playerId)).toBeNull();
+
+    // The session's own snapshotted stats survive the player record's deletion - they're
+    // keyed by playerId as plain data, not a live foreign-key relationship.
+    const [playerSession] = await store.playerSessions.list({
+      sessionId: startAck.sessionId,
+      playerId: helloAck.playerId,
+    } as any);
+    expect(playerSession).toBeTruthy();
   });
 
   it('session:hello rejects a bad admin PIN with an ack and disconnects the socket', async () => {

@@ -380,21 +380,18 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       ack?.({ ok: true });
     });
 
-    // Removes a player record outright - but only if they've never actually played a
-    // session (no QrCtfPlayerSession rows), since deleting a player who has one would
-    // orphan that session's historical tag/capture/score data. A player who registered
-    // but the game never started for (or who joined after a session already ended) is
-    // exactly the case this exists for - cleaning up test/duplicate/no-show registrations.
+    // Removes a player from the station roster - same idea as
+    // admin:respawnLocation:delete for respawn points, or claiming/unclaiming a Control
+    // Point: the players list is just "who's currently added to this station," not a
+    // permanent historical record, so removal is unconditional even if they've already
+    // played a session. That session's own snapshotted stats (QrCtfPlayerSession,
+    // TeamSession totals, etc.) are keyed by playerId as plain data, not a live
+    // foreign-key relationship, so they're untouched by deleting the player record itself.
     socket.on('admin:player:remove', async (raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'admin') return;
       const body = (raw ?? {}) as { playerId?: string };
       if (!body.playerId) {
         ack?.({ ok: false, error: 'invalid_payload' });
-        return;
-      }
-      const playerSessions = await store.playerSessions.list({ playerId: body.playerId } as any);
-      if (playerSessions.length > 0) {
-        ack?.({ ok: false, error: 'player_has_session_history' });
         return;
       }
       await store.players.delete(body.playerId);
