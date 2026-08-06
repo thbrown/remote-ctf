@@ -27,11 +27,13 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 cd "${SCRIPT_DIR}/.."
 
 # `pnpm start` runs the prebuilt apps/hub-server/dist/, which does NOT rebuild itself -
-# after a `git pull` that's stale code silently, with no error. Always rebuild both
-# workspaces here so this script never runs anything but what's actually checked out.
-echo "[run-hub] Building web app and hub-server..."
-pnpm --filter @foundry-ctf/web build
-pnpm --filter @foundry-ctf/hub-server build
+# after a `git pull` that's stale code silently, with no error. Always rebuild every
+# workspace here (pnpm -r respects the dependency graph, so packages/shared - a real
+# runtime dependency of hub-server's compiled dist/, not just a type-only one - always
+# builds before anything that imports it) so this script never runs anything but what's
+# actually checked out.
+echo "[run-hub] Building all workspaces..."
+pnpm -r build
 
 echo "[run-hub] PUBLIC_ORIGIN=${PUBLIC_ORIGIN}"
 exec pnpm --filter @foundry-ctf/hub-server start

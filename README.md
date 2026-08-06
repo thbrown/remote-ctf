@@ -37,7 +37,13 @@ pnpm install
 
 ## Running in development
 
+`packages/shared` is a real runtime dependency of the Hub (not just types), so build it
+once before running anything that imports it — `pnpm --filter @foundry-ctf/hub-server dev`
+included. Re-run this whenever you change `packages/shared`; the dev server doesn't
+watch/rebuild it for you.
+
 ```bash
+pnpm --filter @foundry-ctf/shared build
 pnpm --filter @foundry-ctf/hub-server dev
 ```
 
@@ -90,21 +96,23 @@ for the full list and defaults). The ones you're most likely to set for a real d
    Hub's default `PUBLIC_ORIGIN`). See [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)
    for what it does and how to override the SSID/password, or to do it by hand.
 3. Clone this repo onto the Pi and run `pnpm install`.
-4. Build the web app: `pnpm --filter @foundry-ctf/web build`.
-5. Build the server: `pnpm --filter @foundry-ctf/hub-server build`.
-6. Start it. `PUBLIC_ORIGIN` is auto-detected from the Pi's LAN IP and logged on boot, but
+4. Build every workspace: `pnpm -r build` (this includes `packages/shared` — a real
+   runtime dependency of the compiled Hub, not just types, so it must be built too, in
+   that order; `pnpm -r` handles the ordering for you). `./ops/run-hub.sh` below already
+   does this for you every time, so you only need this step if starting manually instead.
+5. Start it. `PUBLIC_ORIGIN` is auto-detected from the Pi's LAN IP and logged on boot, but
    with more than one network interface (e.g. the AP running on a USB Wi-Fi adapter per
    [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)) auto-detection can't
    tell which one is the game network, so pin it explicitly instead of guessing:
    ```bash
    ./ops/run-hub.sh   # NODE_ENV=production, PUBLIC_ORIGIN=https://<AP_IP> (10.0.0.1 by default)
    ```
-   or set the same env vars by hand:
+   or build (step 4) and start manually with the same env vars:
    ```bash
    NODE_ENV=production ADMIN_PIN=<pin> PUBLIC_ORIGIN=https://10.0.0.1 \
      pnpm --filter @foundry-ctf/hub-server start
    ```
-7. Confirm all four listeners come up (`nodeApp`, `deviceApp`, `spectatorApp`, and
+6. Confirm all four listeners come up (`nodeApp`, `deviceApp`, `spectatorApp`, and
    `portalApp` if enabled) and that `tools/sim-control-point` (or real Control Point
    hardware, once built per `docs/02-FIRMWARE.md`) can register against it. `/test-qr`
    (linked from the Admin app) has sample player/respawn QR codes for testing scans
