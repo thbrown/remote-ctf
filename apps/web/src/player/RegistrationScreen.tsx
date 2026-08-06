@@ -6,7 +6,12 @@ import { downscalePhoto } from './photo';
 /** Registration happens before gameplay starts, so it doesn't need camera-stream or
  * geolocation permissions - those are requested later by GameplayScreen, once there's
  * an actual reason to ask for them. A photo, if the player adds one, is a one-shot
- * file/camera picker rather than a live video permission grant. */
+ * file/camera picker rather than a live video permission grant.
+ *
+ * Team selection here only picks a team locally - it does NOT submit anything by
+ * itself, so a player can still fill in their name/photo afterward. Submission (and the
+ * transition away from this screen once the server confirms it) happens on the explicit
+ * "Join game" button. */
 export function RegistrationScreen({
   socket,
   teams,
@@ -19,8 +24,9 @@ export function RegistrationScreen({
   const [nameInput, setNameInput] = useState(initialName);
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [joining, setJoining] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -36,14 +42,17 @@ export function RegistrationScreen({
     }
   }
 
-  function joinTeam(teamId: string) {
-    setJoining(teamId);
+  function submit() {
+    if (!nameInput.trim() || !selectedTeamId || submitting) return;
+    setSubmitting(true);
     socket.emit('player:update', {
-      playerName: nameInput.trim() || undefined,
-      teamId,
+      playerName: nameInput.trim(),
+      teamId: selectedTeamId,
       ...(photoBase64 ? { profilePicture: photoBase64 } : {}),
     });
   }
+
+  const canSubmit = nameInput.trim().length > 0 && selectedTeamId !== null && !submitting;
 
   return (
     <div className="registration-screen">
@@ -71,14 +80,19 @@ export function RegistrationScreen({
         {teams.map((t) => (
           <button
             key={t.teamId}
-            style={{ background: t.hexColor }}
-            disabled={joining !== null}
-            onClick={() => joinTeam(t.teamId)}
+            style={{ background: t.hexColor, outline: selectedTeamId === t.teamId ? '3px solid white' : 'none' }}
+            disabled={submitting}
+            onClick={() => setSelectedTeamId(t.teamId)}
           >
-            {joining === t.teamId ? 'Joining…' : t.teamName}
+            {t.teamName}
+            {selectedTeamId === t.teamId ? ' ✓' : ''}
           </button>
         ))}
       </div>
+
+      <button disabled={!canSubmit} onClick={submit}>
+        {submitting ? 'Joining…' : 'Join game'}
+      </button>
     </div>
   );
 }

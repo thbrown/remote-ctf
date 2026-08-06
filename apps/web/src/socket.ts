@@ -23,27 +23,6 @@ export function savePlayerIdentity(identity: PlayerIdentity): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(identity));
 }
 
-const ONBOARDED_KEY_PREFIX = 'foundry-ctf:onboarded:';
-
-/** Tracks whether a player has completed the one-time "claim your badge" onboarding step
- * (ClaimBadgeScreen), per playerId, so a refresh doesn't re-prompt someone who already
- * did it. */
-export function hasCompletedOnboarding(playerId: string): boolean {
-  try {
-    return localStorage.getItem(ONBOARDED_KEY_PREFIX + playerId) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function markOnboardingComplete(playerId: string): void {
-  try {
-    localStorage.setItem(ONBOARDED_KEY_PREFIX + playerId, '1');
-  } catch {
-    // ignore - worst case they're asked to scan their own QR again
-  }
-}
-
 const OWN_PLAYER_CACHE_KEY = 'foundry-ctf:own-player-cache';
 
 /** Caches the last-known ownPlayer record so a refresh/reconnect can render the right

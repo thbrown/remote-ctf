@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { encodeRpQr } from '@foundry-ctf/shared';
+import { encodePlQr, encodeRpQr } from '@foundry-ctf/shared';
 import { useGame } from '../useGame';
 import { QrThumbnail } from './QrThumbnail';
 
@@ -20,6 +20,15 @@ interface RespawnLocationRow {
   allowedTeamIds: string[];
 }
 
+interface PlayerRow {
+  playerId: string;
+  playerName: string;
+  teamId: string | null;
+  playerStatus: string;
+  qrCodeToken: string;
+  qrCodeClaimed: boolean;
+}
+
 export function AdminApp() {
   const [pin, setPin] = useState('');
   const [pinSubmitted, setPinSubmitted] = useState(false);
@@ -35,6 +44,7 @@ export function AdminApp() {
   const [rpLong, setRpLong] = useState('');
   const [rpTeamIds, setRpTeamIds] = useState<string[]>([]);
   const [rpCustomId, setRpCustomId] = useState('');
+  const [players, setPlayers] = useState<PlayerRow[]>([]);
 
   function refreshRespawnLocations() {
     socket.emit('admin:respawnLocation:list', {}, (res: any) => {
@@ -45,11 +55,16 @@ export function AdminApp() {
   useEffect(() => {
     if (state.status !== 'connected' || !pinSubmitted) return;
     refreshRespawnLocations();
-    const interval = setInterval(() => {
+    function pollNodesAndPlayers() {
       socket.emit('admin:nodes:list', {}, (res: any) => {
         if (res?.ok) setNodes(res.nodes);
       });
-    }, 3000);
+      socket.emit('admin:players:list', {}, (res: any) => {
+        if (res?.ok) setPlayers(res.players);
+      });
+    }
+    pollNodesAndPlayers();
+    const interval = setInterval(pollNodesAndPlayers, 3000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, state.status, pinSubmitted]);
@@ -158,20 +173,32 @@ export function AdminApp() {
       </section>
 
       <section>
-        <h2>Teams</h2>
+        <h2>Players</h2>
         <table>
           <thead>
-            <tr><th>Team</th><th>Score</th><th>Tags inflicted</th><th>Tags received</th></tr>
+            <tr><th>Name</th><th>Team</th><th>Status</th><th>QR code ID</th><th>Badge</th></tr>
           </thead>
           <tbody>
-            {state.teams.map((t) => (
-              <tr key={t.teamId}>
-                <td><span className="swatch" style={{ background: t.hexColor }} /> {t.teamName}</td>
-                <td>{Math.round(t.score * 100)}%</td>
-                <td>{t.totalTagsInflicted}</td>
-                <td>{t.totalTagsReceived}</td>
-              </tr>
-            ))}
+            {players.map((p) => {
+              const team = p.teamId ? state.teams.find((t) => t.teamId === p.teamId) : null;
+              return (
+                <tr key={p.playerId}>
+                  <td>{p.playerName}</td>
+                  <td>
+                    {team ? (
+                      <>
+                        <span className="swatch" style={{ background: team.hexColor }} /> {team.teamName}
+                      </>
+                    ) : (
+                      '— (not yet joined a team)'
+                    )}
+                  </td>
+                  <td>{p.playerStatus}</td>
+                  <td>{p.qrCodeClaimed ? p.qrCodeToken : 'unclaimed'}</td>
+                  <td>{p.qrCodeClaimed && <QrThumbnail value={encodePlQr(p.qrCodeToken)} size={64} />}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>
@@ -196,10 +223,8 @@ export function AdminApp() {
             })}
           </tbody>
         </table>
-      </section>
 
-      <section>
-        <h2>Nodes</h2>
+        <h3>Claim a node</h3>
         <div className="claim-form">
           <input value={claimMac} onChange={(e) => setClaimMac(e.target.value)} placeholder="MAC address (AA:BB:CC:DD:EE:FF)" />
           <input value={claimName} onChange={(e) => setClaimName(e.target.value)} placeholder="Control Point name" />
@@ -227,7 +252,7 @@ export function AdminApp() {
       </section>
 
       <section>
-        <h2>Respawn Locations</h2>
+        <h2>Respawn Points</h2>
         <div className="claim-form">
           <input value={rpLat} onChange={(e) => setRpLat(e.target.value)} placeholder="Latitude" />
           <input value={rpLong} onChange={(e) => setRpLong(e.target.value)} placeholder="Longitude" />

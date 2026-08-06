@@ -1,15 +1,17 @@
 /**
  * doc01 §6 — socket.io connection handling: identity (session:hello), the four
  * game-input events, admin actions, and the store-change-feed-driven state:patch
- * broadcast (HUB-054/092). HUB-094: spectator sockets are read-only — every
- * client->server handler below checks `role` first and silently drops anything from a
- * spectator (they're simply never given a role that passes those checks).
+ * broadcast (HUB-054/092). HUB-094: spectator sockets are read-only for gameplay - every
+ * game-input/admin handler below checks `role` first and silently drops anything from a
+ * spectator. The one deliberate exception is `spectator:players:list`, a narrow read-only
+ * roster query returning only name/team/status (never qrCodeToken or playerSecret) for the
+ * public scoreboard.
  *
  * Admin surface implemented in this pass: session start/stop, Node claim, Node identify,
- * Node list, Respawn Location create/list/delete. Player roster actions
- * (rename/regenerate token/force-respawn) and Node rename/delete are NOT yet implemented —
- * see PROGRESS.md gap list. The Web App should only wire buttons for what exists here
- * until that's filled in.
+ * Node list, Respawn Location create/list/delete, Players list (read-only roster).
+ * Player roster mutations (rename/regenerate token/force-respawn) and Node rename/delete
+ * are NOT yet implemented — see PROGRESS.md gap list. The Web App should only wire
+ * buttons for what exists here until that's filled in.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
@@ -94,6 +96,7 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
             playerSessionId: null,
             teamId: null,
             qrCodeToken: randomToken(),
+            qrCodeClaimed: false,
             playerStatus: 'active',
             profilePicture: null,
             locationLat: null,
@@ -180,7 +183,7 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
         ack?.({ ok: false, error: 'already_claimed' });
         return;
       }
-      await store.players.update(state.playerId, { qrCodeToken: qr.qrCodeToken } as any);
+      await store.players.update(state.playerId, { qrCodeToken: qr.qrCodeToken, qrCodeClaimed: true } as any);
       ack?.({ ok: true });
     });
 
@@ -279,6 +282,37 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       if (state.role !== 'admin') return;
       const nodes = registry.list().map((r) => ({ ...r, isOnline: registry.isOnline(r) }));
       ack?.({ ok: true, nodes });
+    });
+
+    socket.on('admin:players:list', async (_raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'admin') return;
+      const players = await store.players.list({ stationId } as any);
+      // playerSecret is a login credential, never send it over the wire to anyone but the
+      // owning player themselves (already done via ownPlayer in state:snapshot).
+      const roster = players.map((p: any) => ({
+        playerId: p.playerId,
+        playerName: p.playerName,
+        teamId: p.teamId,
+        playerStatus: p.playerStatus,
+        qrCodeToken: p.qrCodeToken,
+        qrCodeClaimed: p.qrCodeClaimed,
+      }));
+      ack?.({ ok: true, players: roster });
+    });
+
+    // HUB-094-style redaction: the public no-auth scoreboard gets name/team/status only -
+    // never qrCodeToken (would let anyone forge a tag) or playerSecret (identity theft) or
+    // location.
+    socket.on('spectator:players:list', async (_raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'spectator') return;
+      const players = await store.players.list({ stationId } as any);
+      const roster = players.map((p: any) => ({
+        playerId: p.playerId,
+        playerName: p.playerName,
+        teamId: p.teamId,
+        playerStatus: p.playerStatus,
+      }));
+      ack?.({ ok: true, players: roster });
     });
 
     socket.on('admin:node:identify', async (raw: unknown, ack?: (res: unknown) => void) => {

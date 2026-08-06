@@ -279,4 +279,43 @@ describe('WsGateway', () => {
     expect(ack.ok).toBe(false);
     expect(ack.error).toBe('wrong_qr_kind');
   });
+
+  it('admin:players:list returns the roster including qrCodeToken', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(helloAck.playerId, { playerName: 'Ada', teamId: TEAM_A } as any);
+    await new Promise<any>((resolve) =>
+      player.emit('player:claimQr', { raw: 'qrctf:1:pl:ROSTER-TEST-BADGE-001' }, resolve),
+    );
+
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+    const listAck = await new Promise<any>((resolve) => admin.emit('admin:players:list', {}, resolve));
+
+    expect(listAck.ok).toBe(true);
+    const row = listAck.players.find((p: any) => p.playerId === helloAck.playerId);
+    expect(row).toMatchObject({
+      playerName: 'Ada',
+      teamId: TEAM_A,
+      qrCodeToken: 'ROSTER-TEST-BADGE-001',
+      qrCodeClaimed: true,
+    });
+    expect(row.playerSecret).toBeUndefined();
+  });
+
+  it('spectator:players:list redacts qrCodeToken and playerSecret', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(helloAck.playerId, { playerName: 'Grace', teamId: TEAM_B } as any);
+
+    const spectator = connect();
+    await new Promise<any>((resolve) => spectator.emit('session:hello', { role: 'spectator' }, resolve));
+    const listAck = await new Promise<any>((resolve) => spectator.emit('spectator:players:list', {}, resolve));
+
+    expect(listAck.ok).toBe(true);
+    const row = listAck.players.find((p: any) => p.playerId === helloAck.playerId);
+    expect(row).toMatchObject({ playerName: 'Grace', teamId: TEAM_B, playerStatus: 'active' });
+    expect(row.qrCodeToken).toBeUndefined();
+    expect(row.playerSecret).toBeUndefined();
+  });
 });

@@ -177,18 +177,6 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
           </div>
         )}
 
-        <div className="scoreboard-mini">
-          {[...state.teams]
-            .sort((a, b) => b.score - a.score)
-            .map((t) => (
-              <div key={t.teamId} className="scoreboard-row">
-                <span className="swatch" style={{ background: t.hexColor }} />
-                <span>{t.teamName}</span>
-                <span>{Math.round(t.score * 100)}%</span>
-              </div>
-            ))}
-        </div>
-
         {state.lastRejection && (
           <div className="rejection-toast">{state.lastRejection.reason.replace(/_/g, ' ')}</div>
         )}

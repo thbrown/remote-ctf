@@ -66,6 +66,9 @@ export interface QrCtfPlayer {
   playerSessionId: string | null;
   teamId: string | null;
   qrCodeToken: string; // >=16 random chars (HUB-178)
+  /** True once this player has claimed a physical badge via player:claimQr - until then
+   * qrCodeToken is a placeholder nobody actually holds (see PlayerApp/ClaimBadgeScreen). */
+  qrCodeClaimed: boolean;
   playerStatus: PlayerStatus;
   profilePicture: AttachmentRef | null;
   locationLat: number | null;

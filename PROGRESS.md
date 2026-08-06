@@ -97,11 +97,20 @@ live. There is no more scaffolding work; what's left is closing gaps and hardeni
    (doc01 §8.1) has the admin scan the physical `cp` sticker. `AdminApp` has a text input
    instead. The QR parsing/codec (`packages/shared/src/qr.ts`) already supports `cp`
    payloads — wiring a `qr-scanner` camera view into the claim flow is a small addition.
-4. **Player photo upload (HUB-171) isn't wired client-side.** Server-side `player:update`
-   already accepts a base64 `profilePicture` and stores it via `AttachmentStore` with a
-   64KB cap — there's just no camera/file-picker UI calling it yet.
-5. **No player roster admin actions**: rename, regenerate `qrCodeToken` (HUB-178, "if a
-   shirt is compromised"), force-respawn. No printable per-player shirt-QR sheet either.
+4. ~~Player photo upload (HUB-171) isn't wired client-side.~~ **Done** — `RegistrationScreen`/
+   `GameplayScreen`'s profile editor both have a file/camera picker that downscales to
+   128x128 client-side (`apps/web/src/player/photo.ts`) and sends it via `player:update`.
+5. **Player roster admin actions partially done.** `admin:players:list` (read-only:
+   name/team/status/qrCodeToken/qrCodeClaimed) exists and is shown in `AdminApp`'s
+   "Players" section. Still missing: rename, regenerate `qrCodeToken` (HUB-178, "if a
+   badge is compromised"), force-respawn, and a printable badge-sheet generator.
+   **Also note the player QR model changed from what HUB-178/CON-030 originally implied**:
+   players now *claim* a pre-printed physical badge via `player:claimQr` (first scan
+   wins) rather than the server assigning `qrCodeToken` and the player's phone
+   displaying it — see `apps/hub-server/src/ws/WsGateway.ts`'s `player:claimQr` handler
+   and `apps/web/src/player/ClaimBadgeScreen.tsx`. A batch badge-sheet generator (N
+   printable `pl` QR codes ahead of a game) is the natural next step but not built yet;
+   `/test-qr` has 3 fixed sample badges for testing in the meantime.
 6. **No Node rename/delete** in the Admin UI (registry-side support exists via
    `NodeRegistry`/`store.controlPoints`, just no WS handler wired up).
 7. **Doc02 (Control Point firmware) was never provided to this agent** — only doc00 (wire

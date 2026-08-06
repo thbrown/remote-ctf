@@ -17,8 +17,12 @@ const ERROR_MESSAGES: Record<string, string> = {
  * independently of any player, e.g. a wristband handed out before the game) by scanning
  * it once. Whatever token they scan becomes their qrCodeToken - the same code other
  * players scan on their badge to tag them. This is also the first point camera
- * permission is requested, so it doubles as a "does your camera work" check. */
-export function ClaimBadgeScreen({ socket, onClaimed }: { socket: Socket; onClaimed: () => void }) {
+ * permission is requested, so it doubles as a "does your camera work" check.
+ *
+ * No onClaimed callback: a successful claim sets qrCodeClaimed on the server, which
+ * arrives back as a qrCtfPlayer patch and flips PlayerApp over to GameplayScreen on its
+ * own - this component doesn't need to know when that happens. */
+export function ClaimBadgeScreen({ socket }: { socket: Socket }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerRef = useRef<QrScanner | null>(null);
   const claimingRef = useRef(false);
@@ -35,7 +39,6 @@ export function ClaimBadgeScreen({ socket, onClaimed }: { socket: Socket; onClai
         socket.emit('player:claimQr', { raw: result.data }, (ack: any) => {
           if (ack?.ok) {
             scanner.stop();
-            onClaimed();
           } else {
             claimingRef.current = false;
             setError(ERROR_MESSAGES[ack?.error] ?? 'Could not claim that badge — try again.');

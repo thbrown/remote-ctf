@@ -31,6 +31,13 @@ export const SCOREBOARD_HTML = `<!doctype html>
   .cp-card { background: #1c1f26; border-radius: 10px; padding: 16px; }
   .cp-name { font-size: 1.1rem; opacity: 0.8; margin-bottom: 8px; }
   .cp-owner { font-size: 1.4rem; font-weight: 700; }
+  h2 { font-size: 1.3rem; opacity: 0.8; margin: 0 0 12px; }
+  #players { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 32px; }
+  .player-card { background: #1c1f26; border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; font-size: 1.1rem; }
+  .player-card .swatch { width: 20px; height: 20px; border-radius: 5px; flex: none; }
+  .player-name { flex: 1; }
+  .player-status { font-size: 0.85rem; opacity: 0.7; }
+  .player-status.tagged_out { color: #ff8080; opacity: 1; }
   #ticker { font-size: 1.1rem; opacity: 0.85; line-height: 1.6; max-height: 200px; overflow-y: auto; }
   #ticker div { border-left: 3px solid #444; padding-left: 10px; margin-bottom: 6px; }
 </style>
@@ -40,6 +47,8 @@ export const SCOREBOARD_HTML = `<!doctype html>
   <div id="timer">Waiting for a session…</div>
   <div id="teams"></div>
   <div id="cps"></div>
+  <h2>Players</h2>
+  <div id="players"></div>
   <div id="ticker"></div>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -48,6 +57,7 @@ export const SCOREBOARD_HTML = `<!doctype html>
     let teams = [];
     let controlPoints = [];
     let session = null;
+    let players = [];
 
     function teamById(id) { return teams.find((t) => t.teamId === id); }
 
@@ -72,9 +82,33 @@ export const SCOREBOARD_HTML = `<!doctype html>
         </div>\`;
       }).join('');
 
+      const playersEl = document.getElementById('players');
+      const sortedPlayers = [...players].sort((a, b) => a.playerName.localeCompare(b.playerName));
+      playersEl.innerHTML = sortedPlayers.map((p) => {
+        const team = p.teamId ? teamById(p.teamId) : null;
+        return \`
+        <div class="player-card">
+          <div class="swatch" style="background:\${team ? team.hexColor : '#555'}"></div>
+          <div class="player-name">\${p.playerName}</div>
+          <div class="player-status \${p.playerStatus}">\${p.playerStatus.replace(/_/g, ' ')}</div>
+        </div>\`;
+      }).join('');
+
       document.getElementById('timer').textContent = session
         ? 'Session in progress: ' + session.sessionName
         : 'No session running';
+    }
+
+    // Players aren't part of state:snapshot/state:patch for spectators (HUB-094 - no
+    // player PII pushed to the public no-auth socket stream), so poll a redacted roster
+    // on an interval instead, same pattern the Admin app uses for its own rosters.
+    function pollPlayers() {
+      socket.emit('spectator:players:list', {}, (res) => {
+        if (res && res.ok) {
+          players = res.players;
+          render();
+        }
+      });
     }
 
     function ticker(text) {
@@ -87,7 +121,9 @@ export const SCOREBOARD_HTML = `<!doctype html>
 
     socket.on('connect', () => {
       socket.emit('session:hello', { role: 'spectator' }, () => {});
+      pollPlayers();
     });
+    setInterval(pollPlayers, 3000);
 
     socket.on('state:snapshot', (snap) => {
       teams = snap.teams;
