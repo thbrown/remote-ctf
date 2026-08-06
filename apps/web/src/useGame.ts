@@ -104,6 +104,9 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
         if (type === 'qrCtfTeam') return { ...s, teams: applyPatch(s.teams, 'teamId', id, patch) };
         if (type === 'qrCtfControlPoint') return { ...s, controlPoints: applyPatch(s.controlPoints, 'controlPointId', id, patch) };
         if (type === 'qrCtfSession') return { ...s, session: patch === null ? null : { ...(s.session ?? ({} as QrCtfSession)), ...(patch as object) } };
+        if (type === 'qrCtfPlayer' && s.ownPlayer?.playerId === id) {
+          return { ...s, ownPlayer: patch === null ? null : { ...s.ownPlayer, ...(patch as object) } };
+        }
         return s;
       });
     }
