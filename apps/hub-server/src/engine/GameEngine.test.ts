@@ -18,6 +18,7 @@ function makeEvents(): GameEngineEvents & { calls: Record<string, any[]> } {
     captureStarted: record('captureStarted'),
     captureProgress: record('captureProgress'),
     captureCompleted: record('captureCompleted'),
+    captureCompletedForPlayer: record('captureCompletedForPlayer'),
     captureAbandoned: record('captureAbandoned'),
     tagInflicted: record('tagInflicted'),
     tagReceived: record('tagReceived'),
@@ -128,6 +129,10 @@ describe('GameEngine — capture (HUB-100..108)', () => {
     await engine.tickCaptures(STATION_ID);
 
     expect(events.calls.captureCompleted).toHaveLength(1);
+    // Delivered to the capturing player specifically (for personal feedback like
+    // haptics/sound), separate from captureCompleted's broadcast to everyone.
+    expect(events.calls.captureCompletedForPlayer).toHaveLength(1);
+    expect(events.calls.captureCompletedForPlayer[0][0]).toBe('p-a');
     const cp = await store.controlPoints.get('cp1');
     expect(cp?.currentOwnerTeamId).toBe(TEAM_A);
     expect(cp?.capturingPlayerId).toBeNull();

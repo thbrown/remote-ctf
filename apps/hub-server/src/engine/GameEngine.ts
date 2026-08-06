@@ -31,6 +31,11 @@ export interface GameEngineEvents {
   captureStarted(e: CaptureStartedEvent): void;
   captureProgress(e: { captureId: string; progress: number; isHumanDetected: boolean }): void;
   captureCompleted(e: CaptureCompletedEvent): void;
+  /** Same completion, but delivered only to the player who did the capturing - for
+   * personal feedback (haptics/sound) that shouldn't fire for every player whenever
+   * anyone anywhere completes a capture, which is what captureCompleted's broadcast is
+   * for (control point state visible to everyone, including spectators). */
+  captureCompletedForPlayer(playerId: string, e: CaptureCompletedEvent): void;
   captureAbandoned(e: CaptureAbandonedEvent): void;
   tagInflicted(sourcePlayerId: string, e: TagEvent): void;
   tagReceived(targetPlayerId: string, e: TagEvent): void;
@@ -460,7 +465,9 @@ export class GameEngine {
     this.captureIdByControlPointId.delete(rt.controlPointId);
     this.captureIdByPlayerId.delete(rt.playerId);
 
-    this.events.captureCompleted({ captureId, controlPointId: rt.controlPointId, teamId: capture.capturingTeamId });
+    const completedEvent = { captureId, controlPointId: rt.controlPointId, teamId: capture.capturingTeamId };
+    this.events.captureCompleted(completedEvent);
+    this.events.captureCompletedForPlayer(rt.playerId, completedEvent);
   }
 
   private async abandonCapture(captureId: string, reason: AbandonReason): Promise<void> {

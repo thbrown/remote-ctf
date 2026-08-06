@@ -34,6 +34,13 @@ export interface GameState {
    * the start of every fresh hello attempt. Admin/spectator only; players always succeed
    * (they get a fresh identity if their stored one doesn't match). */
   authError: string | null;
+  /** Bumped on capture:completedOwn/tag:inflicted/tag:received - each is a distinct object
+   * (even for repeats of the same kind) so a consuming useEffect keyed on this field always
+   * re-fires, which is what drives sound/vibration feedback (see player/feedback.ts). Kept
+   * out of eventLog's string-based approach since that's meant for display text, and these
+   * player-room-targeted events (never broadcast to everyone) are specifically the ones
+   * that should trigger personal feedback, unlike e.g. the broadcast capture:completed. */
+  lastFeedbackEvent: { kind: 'captureCompleted' | 'tagInflicted' | 'tagReceived'; atMs: number } | null;
 }
 
 function applyPatch<T extends Record<string, any>>(list: T[], idKey: string, id: string, patch: unknown): T[] {
@@ -63,6 +70,7 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     lastRejection: null,
     eventLog: [],
     authError: null,
+    lastFeedbackEvent: null,
   }));
   const helloSentRef = useRef(false);
 
@@ -139,6 +147,12 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
       setState((s) => ({ ...s, activeCapture: null }));
       pushLog('Capture completed!');
     }
+    // Player-room-targeted (unlike capture:completed's broadcast to everyone) - this is
+    // specifically "my own capture finished," which is what personal feedback should key
+    // off of, not "anyone anywhere captured anything."
+    function onCaptureCompletedOwn() {
+      setState((s) => ({ ...s, lastFeedbackEvent: { kind: 'captureCompleted', atMs: Date.now() } }));
+    }
     function onCaptureAbandoned(e: { abandonReason: string }) {
       setState((s) => ({ ...s, activeCapture: null }));
       pushLog(`Capture abandoned: ${e.abandonReason}`);
@@ -149,9 +163,11 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     }
     function onTagInflicted() {
       pushLog('You tagged someone!');
+      setState((s) => ({ ...s, lastFeedbackEvent: { kind: 'tagInflicted', atMs: Date.now() } }));
     }
     function onTagReceived() {
       pushLog('You were tagged!');
+      setState((s) => ({ ...s, lastFeedbackEvent: { kind: 'tagReceived', atMs: Date.now() } }));
     }
     function onRespawnCompleted() {
       pushLog('Respawned');
@@ -177,6 +193,7 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     socket.on('capture:started', onCaptureStarted);
     socket.on('capture:progress', onCaptureProgress);
     socket.on('capture:completed', onCaptureCompleted);
+    socket.on('capture:completedOwn', onCaptureCompletedOwn);
     socket.on('capture:abandoned', onCaptureAbandoned);
     socket.on('scan:rejected', onScanRejected);
     socket.on('tag:inflicted', onTagInflicted);
@@ -201,6 +218,7 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
       socket.off('capture:started', onCaptureStarted);
       socket.off('capture:progress', onCaptureProgress);
       socket.off('capture:completed', onCaptureCompleted);
+      socket.off('capture:completedOwn', onCaptureCompletedOwn);
       socket.off('capture:abandoned', onCaptureAbandoned);
       socket.off('scan:rejected', onScanRejected);
       socket.off('tag:inflicted', onTagInflicted);

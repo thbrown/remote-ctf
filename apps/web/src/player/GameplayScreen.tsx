@@ -5,6 +5,7 @@ import QrScannerWorkerPath from 'qr-scanner/qr-scanner-worker.min.js?url';
 import type { Socket } from 'socket.io-client';
 import type { GameState } from '../useGame';
 import { ClaimBadgeScreen } from './ClaimBadgeScreen';
+import { playCaptureFeedback, playTagInflictedFeedback, playTaggedFeedback } from './feedback';
 import { downscalePhoto } from './photo';
 
 QrScanner.WORKER_PATH = QrScannerWorkerPath;
@@ -50,6 +51,17 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
       scannerRef.current = null;
     };
   }, [socket, rescanningBadge]);
+
+  // Fires once per distinct feedback event (see useGame's lastFeedbackEvent doc comment) -
+  // atMs makes every event a new object reference even for repeats of the same kind, so
+  // this always re-runs rather than only on the first occurrence.
+  useEffect(() => {
+    const e = state.lastFeedbackEvent;
+    if (!e) return;
+    if (e.kind === 'captureCompleted') playCaptureFeedback();
+    else if (e.kind === 'tagInflicted') playTagInflictedFeedback();
+    else if (e.kind === 'tagReceived') playTaggedFeedback();
+  }, [state.lastFeedbackEvent]);
 
   // HUB-175: GPS optional, throttled to >=3s, never gates any outcome.
   useEffect(() => {

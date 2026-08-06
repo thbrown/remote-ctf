@@ -13,6 +13,7 @@ export function createSocketIoGameEvents(io: Server): GameEngineEvents {
     captureStarted: (e) => io.emit('capture:started', e),
     captureProgress: (e) => io.emit('capture:progress', e),
     captureCompleted: (e) => io.emit('capture:completed', e),
+    captureCompletedForPlayer: (playerId, e) => io.to(`player:${playerId}`).emit('capture:completedOwn', e),
     captureAbandoned: (e) => io.emit('capture:abandoned', e),
     tagInflicted: (playerId, e) => io.to(`player:${playerId}`).emit('tag:inflicted', e),
     tagReceived: (playerId, e) => io.to(`player:${playerId}`).emit('tag:received', e),
