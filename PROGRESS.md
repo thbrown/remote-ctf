@@ -33,8 +33,11 @@ towards making forward progress and leaving clear notes over stopping to ask.
       plus the interactive `tools/sim-control-point` CLI for manual/visual checks.
 - [ ] **M3** — WS snapshot/patch; profile creation with a 128×128 photo; Stats renders
       live; scoreboard page works.
-- [ ] **M4** — Capture (with grace window), Tag, Respawn, 1 Hz scoring, session
-      start/stop.
+- [x] **M4** — Capture (with grace window), Tag, Respawn, 1 Hz scoring, session
+      start/stop. **Done at the engine level** — `apps/hub-server/src/engine/GameEngine.ts`
+      + 21 passing unit tests in `GameEngine.test.ts` (InMemoryStore + FakeClock). Not yet
+      wired to a live WS transport — that's Task #8 next, then Task #11 does an end-to-end
+      pass through real socket.io.
 - [ ] **M5** — Admin: claim by QR, respawn locations, join sheet, printable sheets.
 - [ ] **M6** — One real ESP Node end-to-end. **Cannot be done without hardware — skip.**
 - [ ] **M7** — RPi AP, systemd unit, 6+ real phones, one complete game. **Cannot be done
