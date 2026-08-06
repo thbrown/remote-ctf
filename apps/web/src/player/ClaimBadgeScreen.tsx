@@ -19,10 +19,22 @@ const ERROR_MESSAGES: Record<string, string> = {
  * players scan on their badge to tag them. This is also the first point camera
  * permission is requested, so it doubles as a "does your camera work" check.
  *
- * No onClaimed callback: a successful claim sets qrCodeClaimed on the server, which
- * arrives back as a qrCtfPlayer patch and flips PlayerApp over to GameplayScreen on its
- * own - this component doesn't need to know when that happens. */
-export function ClaimBadgeScreen({ socket }: { socket: Socket }) {
+ * When used for initial onboarding (no onClaimed passed) a successful claim just sets
+ * qrCodeClaimed on the server, which arrives back as a qrCtfPlayer patch and flips
+ * PlayerApp over to GameplayScreen on its own. When used to change an already-claimed
+ * badge (e.g. from GameplayScreen's profile editor) qrCodeClaimed is already true, so
+ * nothing flips automatically - callers pass onClaimed to know when to close the scanner. */
+export function ClaimBadgeScreen({
+  socket,
+  title = 'Claim your badge',
+  description = "Scan the QR code on the badge/wristband you were handed — it's what other players will scan to tag you.",
+  onClaimed,
+}: {
+  socket: Socket;
+  title?: string;
+  description?: string;
+  onClaimed?: () => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerRef = useRef<QrScanner | null>(null);
   const claimingRef = useRef(false);
@@ -39,6 +51,7 @@ export function ClaimBadgeScreen({ socket }: { socket: Socket }) {
         socket.emit('player:claimQr', { raw: result.data }, (ack: any) => {
           if (ack?.ok) {
             scanner.stop();
+            onClaimed?.();
           } else {
             claimingRef.current = false;
             setError(ERROR_MESSAGES[ack?.error] ?? 'Could not claim that badge — try again.');
@@ -59,8 +72,8 @@ export function ClaimBadgeScreen({ socket }: { socket: Socket }) {
 
   return (
     <div className="own-qr-screen">
-      <h2>Claim your badge</h2>
-      <p>Scan the QR code on the badge/wristband you were handed — it's what other players will scan to tag you.</p>
+      <h2>{title}</h2>
+      <p>{description}</p>
       <div className="own-qr-camera">
         <video ref={videoRef} muted playsInline autoPlay />
       </div>

@@ -4,6 +4,7 @@ import QrScanner from 'qr-scanner';
 import QrScannerWorkerPath from 'qr-scanner/qr-scanner-worker.min.js?url';
 import type { Socket } from 'socket.io-client';
 import type { GameState } from '../useGame';
+import { ClaimBadgeScreen } from './ClaimBadgeScreen';
 import { downscalePhoto } from './photo';
 
 QrScanner.WORKER_PATH = QrScannerWorkerPath;
@@ -23,9 +24,12 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [rescanningBadge, setRescanningBadge] = useState(false);
 
+  // Paused while rescanningBadge is open (ClaimBadgeScreen needs the camera itself, and
+  // two QrScanner instances can't share one device at once) and restarted once it closes.
   useEffect(() => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || rescanningBadge) return;
     const scanner = new QrScanner(
       videoRef.current,
       (result) => {
@@ -45,7 +49,7 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
       scanner.destroy();
       scannerRef.current = null;
     };
-  }, [socket]);
+  }, [socket, rescanningBadge]);
 
   // HUB-175: GPS optional, throttled to >=3s, never gates any outcome.
   useEffect(() => {
@@ -103,6 +107,20 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
 
   function cancelCapture() {
     if (state.activeCapture) socket.emit('capture:cancel', { captureId: state.activeCapture.captureId });
+  }
+
+  if (rescanningBadge) {
+    return (
+      <div className="player-app">
+        <ClaimBadgeScreen
+          socket={socket}
+          title="Scan your new badge"
+          description="Scan the QR code on the new badge/wristband you want to use instead — it replaces your old one immediately."
+          onClaimed={() => setRescanningBadge(false)}
+        />
+        <button onClick={() => setRescanningBadge(false)}>Cancel</button>
+      </div>
+    );
   }
 
   return (
@@ -168,6 +186,11 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="field">
+              QR code / badge
+              <button onClick={() => setRescanningBadge(true)}>Scan a different badge…</button>
             </div>
 
             <div className="profile-dialog-actions">
