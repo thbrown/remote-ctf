@@ -1,15 +1,49 @@
 # Raspberry Pi Wi-Fi access point setup (hostapd + dnsmasq)
 
-Turns the Pi's Wi-Fi radio into a standalone access point with no internet uplink, so
-players can join with their phones and reach the Hub. This matches the Hub's defaults:
-Pi at `10.0.0.1`, SSID `FoundryCTF`, password `capturetheflag` (override via `WIFI_SSID`
-/ `WIFI_PSK` on the Hub — those only control what's *displayed* on the join sheet, so
-keep them in sync with whatever you set here).
+Turns one of the Pi's Wi-Fi radios into a standalone access point with no internet
+uplink, so players can join with their phones and reach the Hub. This matches the Hub's
+defaults: Pi at `10.0.0.1`, SSID `FoundryCTF`, password `capturetheflag` (override via
+`WIFI_SSID`/`WIFI_PSK` on the Hub — those only control what's *displayed* on the join
+sheet, so keep them in sync with whatever you set here).
 
 Tested against Raspberry Pi OS Bookworm (current, uses NetworkManager). If your Pi is on
 an older Raspberry Pi OS release using `dhcpcd` instead of NetworkManager, skip step 2
 and instead follow the [classic dhcpcd-based guide](https://www.raspberrypi.com/documentation/computers/configuration.html#setting-up-a-routed-wireless-access-point)
 for the static-IP part; steps 1, 3, 4, and 5 below still apply.
+
+## Keeping internet access — run the AP on a second radio
+
+Everything below only touches the *one interface* you tell it to (`AP_IFACE`, `wlan0` by
+default). It never touches any other network interface. That means if the Pi 5 has a
+second Wi-Fi radio — e.g. a USB adapter like a Panda PAU06 plugged in alongside the
+built-in Wi-Fi — you can point the AP at the USB adapter and leave the built-in radio on
+your home network/hotspot the whole time. No toggling between "game mode" and "internet
+mode" is needed; both run simultaneously, and `git pull` just works over the built-in
+radio while the AP stays up on the USB one.
+
+```bash
+# find interface names first
+iw dev              # lists each interface + which physical radio (phyN) it's on
+
+# run the AP on the USB adapter (commonly wlan1), leave wlan0 alone
+sudo AP_IFACE=wlan1 ./ops/setup-pi-ap.sh
+
+# connect the untouched built-in radio to your home network for internet
+sudo nmcli device wifi connect "HomeSSID" password "homepassword" ifname wlan0
+```
+
+Not every USB Wi-Fi chipset supports AP mode — the script checks this for you (via
+`iw phy ... info`) and warns before proceeding if `AP_IFACE` doesn't advertise it. Many
+Ralink/MediaTek-based adapters (`rt2800usb`, in-kernel on Raspberry Pi OS, no extra driver
+needed) do support it; some Realtek chipsets need an out-of-tree driver to get AP mode at
+all. If the check warns and hostapd then fails to start, that's usually the cause — check
+`journalctl -u hostapd -e` for specifics.
+
+If you only have one radio, or the second one doesn't support AP mode, run the AP on
+`wlan0` as before and disconnect/reconnect it from your home network manually before and
+after you need internet (`nmcli device disconnect wlan0` / `nmcli device connect wlan0`,
+or physically re-running with different config) — this repo doesn't script that toggle,
+since a second radio is the simpler and more reliable path if you have the hardware for it.
 
 ## Automated (recommended)
 
@@ -38,10 +72,12 @@ sudo apt install -y hostapd dnsmasq
 sudo systemctl unmask hostapd
 ```
 
-## 2. Take `wlan0` away from NetworkManager
+## 2. Take the AP interface away from NetworkManager
 
 Raspberry Pi OS Bookworm manages Wi-Fi via NetworkManager by default, which will fight
-hostapd for control of the interface. Tell it to leave `wlan0` alone:
+hostapd for control of the interface. Tell it to leave your chosen AP interface (`wlan0`
+for the built-in radio, or e.g. `wlan1` for a USB adapter — see "Keeping internet access"
+above) alone. The examples below use `wlan0`; substitute your interface name.
 
 ```bash
 sudo nmcli device set wlan0 managed no
@@ -54,7 +90,10 @@ Make it permanent by adding to `/etc/NetworkManager/NetworkManager.conf`:
 unmanaged-devices=interface-name:wlan0
 ```
 
-## 3. Give `wlan0` a static IP
+Any *other* Wi-Fi interface is left alone and stays under normal NetworkManager control
+— that's what lets it keep a real internet connection.
+
+## 3. Give the AP interface a static IP
 
 Create `/etc/systemd/network/25-wlan0-ap.network` (or use `nmcli`/`dhcpcd.conf` if you're
 on an older stack) so the Pi always answers at `10.0.0.1`:
@@ -137,9 +176,13 @@ sudo systemctl restart hostapd dnsmasq
 
 ## Troubleshooting
 
-- `hostapd` fails to start / "Could not configure driver mode": another process
-  (NetworkManager, `wpa_supplicant`) still has `wlan0`. Re-check step 2 and
-  `sudo systemctl disable --now wpa_supplicant` if present.
+- `hostapd` fails to start / "Could not configure driver mode": either another process
+  (NetworkManager, `wpa_supplicant`) still has the interface — re-check step 2 and
+  `sudo systemctl disable --now wpa_supplicant` if present — or the chipset doesn't
+  support AP mode at all. Check with `iw phy phyN info` (find `N` via `iw dev`) and look
+  for `AP` under "Supported interface modes"; if it's missing, that adapter can't run an
+  AP with the in-kernel driver and needs a different one or a different piece of
+  hardware.
 - Phone connects but gets no IP: `sudo systemctl status dnsmasq`, check
   `sudo journalctl -u dnsmasq -e` for interface-binding errors, confirm `wlan0` has
   `10.0.0.1/24` (step 3) before dnsmasq starts.

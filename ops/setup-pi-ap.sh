@@ -4,17 +4,26 @@
 # Raspberry Pi 5 running Raspberry Pi OS (Bookworm, NetworkManager-based).
 # Safe to re-run: every step checks current state before changing anything.
 #
+# Only AP_IFACE is touched (unmanaged, static-IP'd, handed to hostapd/dnsmasq).
+# Every other network interface - notably the Pi 5's built-in Wi-Fi, if you're
+# running the AP on a USB adapter instead - is left under normal NetworkManager
+# control, so it can stay connected to a real network (home Wi-Fi, a hotspot)
+# for internet access the whole time the AP is up. No toggling required: point
+# AP_IFACE at your USB adapter (e.g. `wlan1`) and connect the other interface
+# to the internet separately, e.g.:
+#   sudo nmcli device wifi connect "HomeSSID" password "homepassword" ifname wlan0
+#
 # See ops/raspberry-pi-ap-setup.md for the manual walkthrough this automates.
 #
 # Usage:
 #   sudo ./ops/setup-pi-ap.sh
 #
 # Override defaults via environment variables, e.g.:
-#   sudo SSID=MyEvent PSK=supersecret ./ops/setup-pi-ap.sh
+#   sudo AP_IFACE=wlan1 SSID=MyEvent PSK=supersecret ./ops/setup-pi-ap.sh
 #
 set -euo pipefail
 
-IFACE="${IFACE:-wlan0}"
+AP_IFACE="${AP_IFACE:-${IFACE:-wlan0}}"
 AP_IP="${AP_IP:-10.0.0.1}"
 AP_CIDR="${AP_CIDR:-24}"
 SSID="${SSID:-FoundryCTF}"
@@ -38,6 +47,23 @@ if [[ ${#PSK} -lt 8 ]]; then
   exit 1
 fi
 
+if ! ip link show "${AP_IFACE}" >/dev/null 2>&1; then
+  echo "Interface ${AP_IFACE} not found. Available wireless interfaces:" >&2
+  iw dev 2>/dev/null | awk '$1=="Interface"{print "  " $2}' >&2 || true
+  echo "Set AP_IFACE to the one you want to use for the AP." >&2
+  exit 1
+fi
+
+if command -v iw >/dev/null 2>&1; then
+  phy="$(iw dev "${AP_IFACE}" info 2>/dev/null | awk '/wiphy/{print $2}')"
+  if [[ -n "${phy}" ]] && ! iw phy "phy${phy}" info 2>/dev/null | grep -A20 'Supported interface modes' | grep -q ' AP$'; then
+    log "WARNING: ${AP_IFACE} (phy${phy}) doesn't advertise AP-mode support via iw."
+    log "  hostapd may fail to start. This is common for some USB Wi-Fi chipsets"
+    log "  without an out-of-tree driver. Continuing anyway - check 'iw list' and"
+    log "  'journalctl -u hostapd -e' if hostapd doesn't come up."
+  fi
+fi
+
 # --- 1. Packages -----------------------------------------------------------
 log "Installing hostapd and dnsmasq (skipped if already present)..."
 apt-get update -qq
@@ -46,15 +72,15 @@ apt-get install -y -qq hostapd dnsmasq
 systemctl unmask hostapd >/dev/null 2>&1 || true
 rfkill unblock wifi || true
 
-# --- 2. Hand wlan0 off from NetworkManager ----------------------------------
+# --- 2. Hand AP_IFACE off from NetworkManager --------------------------------
 if command -v nmcli >/dev/null 2>&1; then
-  log "Marking ${IFACE} unmanaged in NetworkManager..."
-  nm_conf="/etc/NetworkManager/conf.d/unmanaged-${IFACE}.conf"
+  log "Marking ${AP_IFACE} unmanaged in NetworkManager..."
+  nm_conf="/etc/NetworkManager/conf.d/unmanaged-${AP_IFACE}.conf"
   cat >"${nm_conf}" <<EOF
 [keyfile]
-unmanaged-devices=interface-name:${IFACE}
+unmanaged-devices=interface-name:${AP_IFACE}
 EOF
-  nmcli device set "${IFACE}" managed no >/dev/null 2>&1 || true
+  nmcli device set "${AP_IFACE}" managed no >/dev/null 2>&1 || true
   if systemctl is-active --quiet NetworkManager; then
     systemctl reload NetworkManager 2>/dev/null || systemctl restart NetworkManager
   fi
@@ -62,22 +88,22 @@ else
   log "NetworkManager not present, skipping unmanaged-device config."
 fi
 
-# --- 3. Static IP on wlan0 via a small systemd oneshot ----------------------
-log "Installing static IP unit for ${IFACE} (${AP_IP}/${AP_CIDR})..."
+# --- 3. Static IP on AP_IFACE via a small systemd oneshot --------------------
+log "Installing static IP unit for ${AP_IFACE} (${AP_IP}/${AP_CIDR})..."
 ip_unit=/etc/systemd/system/foundry-ctf-ap-ip.service
 cat >"${ip_unit}" <<EOF
 [Unit]
-Description=Foundry CTF - static IP for ${IFACE}
-After=sys-subsystem-net-devices-${IFACE}.device network-pre.target
+Description=Foundry CTF - static IP for ${AP_IFACE}
+After=sys-subsystem-net-devices-${AP_IFACE}.device network-pre.target
 Before=hostapd.service dnsmasq.service
-BindsTo=sys-subsystem-net-devices-${IFACE}.device
+BindsTo=sys-subsystem-net-devices-${AP_IFACE}.device
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/sbin/ip addr replace ${AP_IP}/${AP_CIDR} dev ${IFACE}
-ExecStart=/sbin/ip link set dev ${IFACE} up
-ExecStop=/sbin/ip addr del ${AP_IP}/${AP_CIDR} dev ${IFACE}
+ExecStart=/sbin/ip addr replace ${AP_IP}/${AP_CIDR} dev ${AP_IFACE}
+ExecStart=/sbin/ip link set dev ${AP_IFACE} up
+ExecStop=/sbin/ip addr del ${AP_IP}/${AP_CIDR} dev ${AP_IFACE}
 
 [Install]
 WantedBy=multi-user.target
@@ -103,7 +129,7 @@ fi
 mkdir -p /etc/dnsmasq.d
 cat >/etc/dnsmasq.d/foundry-ctf.conf <<EOF
 # Managed by ops/setup-pi-ap.sh - safe to hand-edit, will be overwritten on re-run.
-interface=${IFACE}
+interface=${AP_IFACE}
 bind-interfaces
 dhcp-range=${DHCP_START},${DHCP_END},255.255.255.0,24h
 dhcp-option=6,${AP_IP}
@@ -115,7 +141,7 @@ log "Writing hostapd config for SSID '${SSID}'..."
 mkdir -p /etc/hostapd
 cat >/etc/hostapd/hostapd.conf <<EOF
 # Managed by ops/setup-pi-ap.sh - safe to hand-edit, will be overwritten on re-run.
-interface=${IFACE}
+interface=${AP_IFACE}
 driver=nl80211
 
 ssid=${SSID}
@@ -151,10 +177,10 @@ log "Verifying..."
 sleep 1
 ok=1
 
-if ip addr show "${IFACE}" | grep -q "${AP_IP}/${AP_CIDR}"; then
-  log "  [ok] ${IFACE} has ${AP_IP}/${AP_CIDR}"
+if ip addr show "${AP_IFACE}" | grep -q "${AP_IP}/${AP_CIDR}"; then
+  log "  [ok] ${AP_IFACE} has ${AP_IP}/${AP_CIDR}"
 else
-  log "  [FAIL] ${IFACE} does not have ${AP_IP}/${AP_CIDR}"
+  log "  [FAIL] ${AP_IFACE} does not have ${AP_IP}/${AP_CIDR}"
   ok=0
 fi
 
