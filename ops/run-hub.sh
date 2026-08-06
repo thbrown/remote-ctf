@@ -23,5 +23,15 @@ if [[ "${ADMIN_PIN}" == "1234" ]]; then
   echo "[run-hub] WARNING: using default ADMIN_PIN=1234 - fine for testing, change it for a real game." >&2
 fi
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+cd "${SCRIPT_DIR}/.."
+
+# `pnpm start` runs the prebuilt apps/hub-server/dist/, which does NOT rebuild itself -
+# after a `git pull` that's stale code silently, with no error. Always rebuild both
+# workspaces here so this script never runs anything but what's actually checked out.
+echo "[run-hub] Building web app and hub-server..."
+pnpm --filter @foundry-ctf/web build
+pnpm --filter @foundry-ctf/hub-server build
+
 echo "[run-hub] PUBLIC_ORIGIN=${PUBLIC_ORIGIN}"
 exec pnpm --filter @foundry-ctf/hub-server start
