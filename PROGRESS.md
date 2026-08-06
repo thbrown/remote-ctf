@@ -46,7 +46,12 @@ ceiling for this session is M0–M5.
 See the "Log" section at the bottom for the detailed run of work. Update the line below
 every time you resume:
 
-**Last known state:** (fill in after first real work unit)
+**Last known state:** `packages/shared` complete and committed (ontology.ts, qr.ts, wire.ts,
+ws.ts, index.ts + qr.test.ts, all passing typecheck+vitest). Workspace scaffolding
+(pnpm-workspace.yaml, root package.json, tsconfig.base.json, per-package package.json/tsconfig
+for shared/hub-server/web/sim-control-point) is in place and `pnpm install` succeeds at root.
+Next in progress: hub-server store layer (Task #4 — Repository/GameStateStore interfaces,
+InMemoryStore, FileSystemStore, TimeSeriesStore, contract test suite).
 
 ## Key architectural decisions already locked in by the spec (don't relitigate)
 
