@@ -3,7 +3,7 @@
 import express from 'express';
 import { SCOREBOARD_HTML } from './scoreboardPage.js';
 
-export function createSpectatorApp() {
+export function createSpectatorApp(): express.Express {
   const app = express();
 
   app.get('/scoreboard', (_req, res) => {

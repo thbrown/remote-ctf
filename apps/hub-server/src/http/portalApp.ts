@@ -9,7 +9,7 @@ import type { Config } from '../config.js';
 
 const SUCCESS_HTML = '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>';
 
-export function createPortalApp(config: Config) {
+export function createPortalApp(config: Config): express.Express {
   const app = express();
 
   app.get(['/hotspot-detect.html', '/library/test/success.html'], (_req, res) => {

@@ -18,7 +18,7 @@ import type { NodeRegistry } from '../nodes/NodeRegistry.js';
 import type { Config } from '../config.js';
 import { validateBody } from './validate.js';
 
-export function createNodeApp(store: GameStateStore, registry: NodeRegistry, config: Config) {
+export function createNodeApp(store: GameStateStore, registry: NodeRegistry, config: Config): express.Express {
   const app = express();
   app.use(express.json());
 

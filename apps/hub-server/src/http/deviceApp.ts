@@ -12,7 +12,7 @@ import type { TlsMaterial } from './tls.js';
 import { renderJoinSheetHtml } from './joinSheetPage.js';
 import { renderTestQrHtml } from './testQrPage.js';
 
-export function createDeviceApp(config: Config, tls: TlsMaterial, webDistDir: string) {
+export function createDeviceApp(config: Config, tls: TlsMaterial, webDistDir: string): express.Express {
   const app = express();
 
   app.get('/cert', (_req, res) => {
