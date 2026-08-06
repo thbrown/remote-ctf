@@ -203,6 +203,12 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       ack?.({ ok: true, controlPointId: cp.controlPointId });
     });
 
+    socket.on('admin:nodes:list', (_raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'admin') return;
+      const nodes = registry.list().map((r) => ({ ...r, isOnline: registry.isOnline(r) }));
+      ack?.({ ok: true, nodes });
+    });
+
     socket.on('admin:node:identify', async (raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'admin') return;
       const body = (raw ?? {}) as { macAddress?: string };

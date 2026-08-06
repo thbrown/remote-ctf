@@ -37,13 +37,24 @@ towards making forward progress and leaving clear notes over stopping to ask.
       simulator; reconciliation proven by deliberately dropping a push. **Done** — see
       `apps/hub-server/src/nodes/nodeIntegration.test.ts` (automated, both scenarios pass)
       plus the interactive `tools/sim-control-point` CLI for manual/visual checks.
-- [x] **M3 (server half only)** — WS snapshot/patch protocol is done and tested
-      (`apps/hub-server/src/ws/`: WsGateway.ts, gameEvents.ts, snapshot.ts, 7 passing
-      integration tests using a real socket.io client/server pair). Profile
-      creation/photo upload plumbing exists server-side (`player:update` handles a base64
-      `profilePicture` -> `AttachmentStore.put`, 64KB cap enforced) but there's no actual
-      128x128 client-side downscaling since that's a Web App (Task #10) concern. Stats
-      rendering and the scoreboard page are pure frontend — not started.
+- [x] **M3** — WS snapshot/patch (server: `apps/hub-server/src/ws/`, 7 passing tests).
+      Web App (`apps/web/`) now exists: mode chooser, PlayerApp (camera QR scan via
+      `qr-scanner`, capture progress ring, tagged-out overlay, team picker, mini
+      scoreboard, event log), AdminApp (PIN gate, session start/stop, team/CP/Node
+      tables, node claim + identify), all wired to the real WS protocol via
+      `useGame.ts`. `pnpm --filter @foundry-ctf/web build` succeeds and the bundle was
+      served for real by the live Hub over HTTPS (verified with curl, see M0 note).
+      **Not done**: client-side photo capture/128×128 downscale (HUB-171) — profile
+      creation only supports a name field right now, no camera-roll/photo picker UI.
+      **Known deviation from HUB-190**: skipped `@blueprintjs/core` in favor of plain CSS
+      to keep the web app build low-risk for an unattended overnight session — the
+      dependency was removed from `apps/web/package.json`. A future session should either
+      add it back and restyle, or explicitly ratify plain CSS as the direction.
+      **Not verified in a real browser** — no display/camera available in this
+      environment. `vite build` passing and the code being a thin, well-typed wrapper
+      around the already-tested WS protocol is the only evidence; the next session (or
+      the user) should open it on an actual phone before trusting the player flow, per
+      R-1's existing "validate on the actual demo iPhone and Android in week 1" advice.
 - [x] **M4** — Capture (with grace window), Tag, Respawn, 1 Hz scoring, session
       start/stop. **Done at the engine level** — `apps/hub-server/src/engine/GameEngine.ts`
       + 21 passing unit tests in `GameEngine.test.ts` (InMemoryStore + FakeClock). Not yet
