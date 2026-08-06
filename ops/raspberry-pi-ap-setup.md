@@ -11,6 +11,25 @@ an older Raspberry Pi OS release using `dhcpcd` instead of NetworkManager, skip 
 and instead follow the [classic dhcpcd-based guide](https://www.raspberrypi.com/documentation/computers/configuration.html#setting-up-a-routed-wireless-access-point)
 for the static-IP part; steps 1, 3, 4, and 5 below still apply.
 
+## Automated (recommended)
+
+[`ops/setup-pi-ap.sh`](setup-pi-ap.sh) does everything in steps 1–7 below and is
+idempotent — safe to re-run any time (after a config change, a fresh flash, etc.).
+
+```bash
+sudo ./ops/setup-pi-ap.sh
+```
+
+Override the SSID/password/IP/channel/country via env vars if you don't want the
+defaults (which match the Hub's own defaults):
+
+```bash
+sudo SSID=MyEvent PSK=supersecretpw COUNTRY=US ./ops/setup-pi-ap.sh
+```
+
+The rest of this doc explains what the script does, for when you want to do it by hand
+or debug something it didn't get right.
+
 ## 1. Install packages
 
 ```bash

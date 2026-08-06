@@ -86,8 +86,9 @@ for the full list and defaults). The ones you're most likely to set for a real d
 
 1. Install Node.js >= 20 and pnpm on the Pi (`corepack enable` after Node is installed).
 2. Configure the Pi as a Wi-Fi access point so player phones can join a LAN with no
-   internet, following [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)
-   (hostapd + dnsmasq, static IP `10.0.0.1` to match the Hub's default `PUBLIC_ORIGIN`).
+   internet: `sudo ./ops/setup-pi-ap.sh` (idempotent, static IP `10.0.0.1` to match the
+   Hub's default `PUBLIC_ORIGIN`). See [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)
+   for what it does and how to override the SSID/password, or to do it by hand.
 3. Clone this repo onto the Pi and run `pnpm install`.
 4. Build the web app: `pnpm --filter @foundry-ctf/web build`.
 5. Build the server: `pnpm --filter @foundry-ctf/hub-server build`.
