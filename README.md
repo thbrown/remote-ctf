@@ -94,7 +94,22 @@ for the full list and defaults). The ones you're most likely to set for a real d
 2. Configure the Pi as a Wi-Fi access point so player phones can join a LAN with no
    internet: `sudo ./ops/setup-pi-ap.sh` (idempotent, static IP `10.0.0.1` to match the
    Hub's default `PUBLIC_ORIGIN`). See [`ops/raspberry-pi-ap-setup.md`](ops/raspberry-pi-ap-setup.md)
-   for what it does and how to override the SSID/password, or to do it by hand.
+   for what it does and how to override the SSID/password, or to do it by hand. **If you
+   have a USB Wi-Fi adapter for the AP and want to keep the built-in radio on the
+   internet, set `AP_IFACE` to the adapter (e.g. `sudo AP_IFACE=wlan1 ./ops/setup-pi-ap.sh`)
+   — the script refuses to run against whichever interface currently has your default
+   route, to stop you from accidentally cutting off internet access on the wrong one.**
+   If that happens anyway (or you need to undo the AP and get connectivity back for any
+   other reason), run `sudo ./ops/recover-pi-ap.sh` (or `sudo AP_IFACE=wlan1
+   ./ops/recover-pi-ap.sh` if it's not `wlan0`) at the Pi's console. The script also
+   installs an `iptables` redirect from `:80`/`:443` to the Hub's normal unprivileged
+   ports (`8080`/`8443`) on the AP interface, so players still just navigate to
+   `https://<AP_IP>` with no port in the URL, but the Hub process itself never needs
+   root or any special capability to bind — `setcap` turned out to be unreliable on
+   some Pi OS setups (fails with "effective file capabilities must either be empty or
+   exactly match..." on filesystems that don't round-trip the capability xattr
+   correctly, e.g. with the read-only overlay filesystem option enabled), so this
+   redirect is the supported path, not a fallback.
 3. Clone this repo onto the Pi and run `pnpm install`.
 4. Build every workspace: `pnpm -r build` (this includes `packages/shared` — a real
    runtime dependency of the compiled Hub, not just types, so it must be built too, in

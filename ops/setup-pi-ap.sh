@@ -54,6 +54,19 @@ if ! ip link show "${AP_IFACE}" >/dev/null 2>&1; then
   exit 1
 fi
 
+if ip route show default 2>/dev/null | grep -q "dev ${AP_IFACE} "; then
+  echo "REFUSING: ${AP_IFACE} currently has the default route (it's your internet connection)." >&2
+  echo "  Turning it into the AP will cut off internet access, e.g. for git pulls." >&2
+  echo "  If you really only have one interface and want to proceed anyway, pass FORCE=1:" >&2
+  echo "    sudo FORCE=1 AP_IFACE=${AP_IFACE} ./ops/setup-pi-ap.sh" >&2
+  echo "  Otherwise point AP_IFACE at your other adapter, e.g.:" >&2
+  echo "    sudo AP_IFACE=wlan1 ./ops/setup-pi-ap.sh" >&2
+  if [[ "${FORCE:-0}" != "1" ]]; then
+    exit 1
+  fi
+  echo "FORCE=1 set - proceeding anyway. You'll need ops/recover-pi-ap.sh to get internet back." >&2
+fi
+
 if command -v iw >/dev/null 2>&1; then
   phy="$(iw dev "${AP_IFACE}" info 2>/dev/null | awk '/wiphy/{print $2}')"
   if [[ -n "${phy}" ]] && ! iw phy "phy${phy}" info 2>/dev/null | grep -A20 'Supported interface modes' | grep -q ' AP$'; then
@@ -172,6 +185,46 @@ systemctl enable hostapd dnsmasq >/dev/null
 systemctl restart dnsmasq
 systemctl restart hostapd
 
+# --- 6b. Redirect :80/:443 to the Hub's unprivileged ports -------------------
+# Linux reserves ports <1024 for root. Rather than grant node itself the
+# capability to bind them (setcap - tried this first, but it depends on the
+# root filesystem correctly round-tripping the security.capability xattr,
+# which fails with "effective file capabilities must either be empty or
+# exactly match..." on some Pi OS setups, e.g. with the read-only overlay
+# filesystem option enabled), redirect the well-known ports to the Hub's
+# normal unprivileged ones (8080/8443, same as dev) at the netfilter level.
+# This only needs root once, here, never for the Hub process itself - so
+# ops/run-hub.sh runs entirely as a normal user. Installed as a systemd
+# oneshot (like the static-IP unit above) so it's reapplied on every boot.
+log "Installing port-redirect unit (:80->8080, :443->8443 on ${AP_IFACE})..."
+redirect_unit=/etc/systemd/system/foundry-ctf-port-redirect.service
+cat >"${redirect_unit}" <<EOF
+[Unit]
+Description=Foundry CTF - redirect :80/:443 to the Hub's unprivileged ports
+After=sys-subsystem-net-devices-${AP_IFACE}.device network-pre.target
+BindsTo=sys-subsystem-net-devices-${AP_IFACE}.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '/sbin/iptables -t nat -C PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8080 || /sbin/iptables -t nat -A PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8080'
+ExecStart=/bin/sh -c '/sbin/iptables -t nat -C PREROUTING -i ${AP_IFACE} -p tcp --dport 443 -j REDIRECT --to-port 8443 || /sbin/iptables -t nat -A PREROUTING -i ${AP_IFACE} -p tcp --dport 443 -j REDIRECT --to-port 8443'
+ExecStop=/sbin/iptables -t nat -D PREROUTING -i ${AP_IFACE} -p tcp --dport 80 -j REDIRECT --to-port 8080
+ExecStop=/sbin/iptables -t nat -D PREROUTING -i ${AP_IFACE} -p tcp --dport 443 -j REDIRECT --to-port 8443
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+if ! command -v iptables >/dev/null 2>&1; then
+  log "  installing iptables..."
+  apt-get install -y -qq iptables
+fi
+
+systemctl daemon-reload
+systemctl enable foundry-ctf-port-redirect.service >/dev/null
+systemctl restart foundry-ctf-port-redirect.service
+
 # --- 7. Verify ----------------------------------------------------------------
 log "Verifying..."
 sleep 1
@@ -198,8 +251,16 @@ else
   ok=0
 fi
 
+if iptables -t nat -C PREROUTING -i "${AP_IFACE}" -p tcp --dport 80 -j REDIRECT --to-port 8080 2>/dev/null \
+  && iptables -t nat -C PREROUTING -i "${AP_IFACE}" -p tcp --dport 443 -j REDIRECT --to-port 8443 2>/dev/null; then
+  log "  [ok] :80/:443 redirect to 8080/8443 on ${AP_IFACE}"
+else
+  log "  [FAIL] port redirect rules missing - check: systemctl status foundry-ctf-port-redirect"
+  ok=0
+fi
+
 if [[ "${ok}" -eq 1 ]]; then
-  log "Done. AP '${SSID}' is up at ${AP_IP}. Start the Hub with PUBLIC_ORIGIN=https://${AP_IP}"
+  log "Done. AP '${SSID}' is up at ${AP_IP}. Start the Hub with ./ops/run-hub.sh"
 else
   log "Completed with errors - see [FAIL] lines above."
   exit 1
