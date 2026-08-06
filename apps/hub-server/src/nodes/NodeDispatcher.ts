@@ -33,6 +33,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** doc00 §0.4 Base URL is always `http://<node.ip>:80` in prod/firmware. In dev,
+ * tools/sim-control-point runs several simulated Nodes in one process and cannot each
+ * bind privileged port 80, so it reports `ip` as `host:port` — recognized here as a
+ * dev-only deviation. Plain IPs (no colon) always get the contractual `:80`. */
+function nodeBaseUrl(ip: string): string {
+  return ip.includes(':') ? `http://${ip}` : `http://${ip}:80`;
+}
+
 export class NodeDispatcher {
   private readonly inFlight = new Set<string>();
   private readonly pending = new Map<string, PendingColorState>();
@@ -51,7 +59,7 @@ export class NodeDispatcher {
    * a game-correctness path). */
   async identify(mac: string, ip: string): Promise<boolean> {
     try {
-      const res = await fetchWithTimeout(`http://${ip}:80/identify`, { method: 'POST' }, REQUEST_TIMEOUT_MS);
+      const res = await fetchWithTimeout(`${nodeBaseUrl(ip)}/identify`, { method: 'POST' }, REQUEST_TIMEOUT_MS);
       return res.status === 204 || res.ok;
     } catch {
       return false;
@@ -88,7 +96,7 @@ export class NodeDispatcher {
   private async send(mac: string, state: PendingColorState): Promise<boolean> {
     try {
       const res = await fetchWithTimeout(
-        `http://${state.ip}:80/set-color`,
+        `${nodeBaseUrl(state.ip)}/set-color`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },

@@ -84,7 +84,7 @@ describe('nodeApp', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ mac: 'AA:BB:CC:DD:EE:FF', ip: '10.0.0.51', fw: '1.0.0' }),
     });
-    const body = await res.json();
+    const body = (await res.json()) as { claimed: boolean; controlPointId: string | null };
     expect(body.claimed).toBe(true);
     expect(body.controlPointId).toBe('cp1');
   });
@@ -138,7 +138,7 @@ describe('nodeApp', () => {
       body: JSON.stringify({ mac: 'aa:bb:cc:dd:ee:ff', ip: '10.0.0.99', detected: false, hexColor: '#202020' }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { claimed: boolean; hexColor: string };
     expect(body.claimed).toBe(false);
     expect(body.hexColor).toBe('#202020');
   });
