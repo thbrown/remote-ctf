@@ -43,4 +43,9 @@ describe('parseQr', () => {
     expect(isQrParseError(parseQr('qrctf:1:cp'))).toBe(true);
     expect(isQrParseError(parseQr('qrctf:1:cp:'))).toBe(true);
   });
+
+  it('trims stray whitespace so two reads of "the same" code always match', () => {
+    const parsed = parseQr('  qrctf:1:pl:TESTPLAYERTOKEN01\n');
+    expect(!isQrParseError(parsed) && parsed.kind === 'pl' && parsed.qrCodeToken === 'TESTPLAYERTOKEN01').toBe(true);
+  });
 });

@@ -148,6 +148,12 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
             <div>Return to your respawn point</div>
           </div>
         )}
+        {!taggedOut && !state.session && (
+          <div className="waiting-overlay">
+            <div>YOU'RE IN!</div>
+            <div>Waiting for the admin to start the game…</div>
+          </div>
+        )}
       </div>
 
       <div className="stats-panel">

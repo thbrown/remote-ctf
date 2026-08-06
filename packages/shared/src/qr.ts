@@ -34,7 +34,11 @@ export type QrParseError =
  * kinds since only `cp` values contain colons, but we apply the same "first 3 colons"
  * split rule uniformly per the contract's wording.
  */
-export function parseQr(raw: string): ParsedQr | QrParseError {
+export function parseQr(rawInput: string): ParsedQr | QrParseError {
+  // Some scanners/print paths can leave stray leading/trailing whitespace (or a trailing
+  // newline) around otherwise-identical content - trim before comparing/storing so two
+  // reads of "the same" code can never mismatch on invisible characters alone.
+  const raw = rawInput.trim();
   if (!raw.startsWith('qrctf:')) return { reason: 'unknown_scheme' };
 
   const parts = raw.split(':');
@@ -47,7 +51,7 @@ export function parseQr(raw: string): ParsedQr | QrParseError {
     return { reason: 'unknown_version', version: versionStr };
   }
 
-  const value = valueParts.join(':');
+  const value = valueParts.join(':').trim();
   if (value.length === 0) return { reason: 'malformed' };
 
   switch (kind as QrKind) {
