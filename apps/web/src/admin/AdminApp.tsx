@@ -34,10 +34,39 @@ interface PlayerRow {
   capturesCompleted: number;
 }
 
+function AdminLogin({
+  pin,
+  setPin,
+  onSubmit,
+  authError,
+}: {
+  pin: string;
+  setPin: (v: string) => void;
+  onSubmit: () => void;
+  authError: string | null;
+}) {
+  return (
+    <div className="admin-login">
+      <h2>Admin PIN</h2>
+      <input
+        type="password"
+        value={pin}
+        onChange={(e) => setPin(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && onSubmit()}
+      />
+      {authError && <div className="form-error">Incorrect PIN — try again.</div>}
+      <button onClick={onSubmit}>Enter</button>
+    </div>
+  );
+}
+
 export function AdminApp() {
   const [pin, setPin] = useState('');
-  const [pinSubmitted, setPinSubmitted] = useState(false);
-  const { socket, state } = useGame('admin', pinSubmitted ? pin : undefined);
+  // Deliberately separate from `pin` (which tracks every keystroke): only updates when
+  // "Enter" is clicked, so useGame's effect (keyed on this value) doesn't re-send
+  // session:hello on every keystroke - only on an actual submit.
+  const [submittedPin, setSubmittedPin] = useState<string | undefined>(undefined);
+  const { socket, state } = useGame('admin', submittedPin);
 
   const [sessionName, setSessionName] = useState('Round 1');
   const [activeTeamIds, setActiveTeamIds] = useState<string[]>([]);
@@ -50,6 +79,7 @@ export function AdminApp() {
   const [rpTeamIds, setRpTeamIds] = useState<string[]>([]);
   const [rpCustomId, setRpCustomId] = useState('');
   const [players, setPlayers] = useState<PlayerRow[]>([]);
+  const [qrEdits, setQrEdits] = useState<Record<string, string>>({});
 
   function refreshRespawnLocations() {
     socket.emit('admin:respawnLocation:list', {}, (res: any) => {
@@ -58,7 +88,7 @@ export function AdminApp() {
   }
 
   useEffect(() => {
-    if (state.status !== 'connected' || !pinSubmitted) return;
+    if (state.status !== 'connected' || submittedPin === undefined) return;
     refreshRespawnLocations();
     function pollNodesAndPlayers() {
       socket.emit('admin:nodes:list', {}, (res: any) => {
@@ -72,16 +102,30 @@ export function AdminApp() {
     const interval = setInterval(pollNodesAndPlayers, 3000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, state.status, pinSubmitted]);
+  }, [socket, state.status, submittedPin]);
 
-  if (!pinSubmitted) {
-    return (
-      <div className="admin-login">
-        <h2>Admin PIN</h2>
-        <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} />
-        <button onClick={() => setPinSubmitted(true)}>Enter</button>
-      </div>
-    );
+  if (submittedPin === undefined || state.authError) {
+    return <AdminLogin pin={pin} setPin={setPin} onSubmit={() => setSubmittedPin(pin)} authError={state.authError} />;
+  }
+
+  if (state.status !== 'connected') {
+    return <div className="admin-login">Connecting…</div>;
+  }
+
+  function setPlayerQrCode(playerId: string) {
+    const qrCodeToken = (qrEdits[playerId] ?? '').trim();
+    if (!qrCodeToken) return;
+    socket.emit('admin:player:setQrCode', { playerId, qrCodeToken }, (res: any) => {
+      if (!res?.ok) {
+        alert(`Failed to set QR code: ${res?.error ?? 'unknown error'}`);
+        return;
+      }
+      setQrEdits((edits) => {
+        const next = { ...edits };
+        delete next[playerId];
+        return next;
+      });
+    });
   }
 
   function toggleActiveTeam(teamId: string) {
@@ -150,33 +194,36 @@ export function AdminApp() {
         Connection: {state.status} · Session: {state.session ? state.session.sessionName : 'none running'}
       </div>
 
-      <section>
-        <h2>Session</h2>
-        {state.session ? (
-          <button onClick={stopSession}>Stop session</button>
-        ) : (
-          <>
-            <input value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="Session name" />
-            <div className="team-toggle-list">
-              {state.teams.map((t) => (
-                <label key={t.teamId} className="team-toggle">
-                  <input
-                    type="checkbox"
-                    checked={activeTeamIds.includes(t.teamId)}
-                    onChange={() => toggleActiveTeam(t.teamId)}
-                  />
-                  <span className="swatch" style={{ background: t.hexColor }} />
-                  {t.teamName}
-                </label>
-              ))}
-            </div>
-            <button onClick={startSession} disabled={activeTeamIds.length < 2}>
-              Start session
-            </button>
-          </>
-        )}
-      </section>
+      <div className="admin-group admin-group-session">
+        <section>
+          <h2>Session</h2>
+          {state.session ? (
+            <button onClick={stopSession}>Stop session</button>
+          ) : (
+            <>
+              <input value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="Session name" />
+              <div className="team-toggle-list">
+                {state.teams.map((t) => (
+                  <label key={t.teamId} className="team-toggle">
+                    <input
+                      type="checkbox"
+                      checked={activeTeamIds.includes(t.teamId)}
+                      onChange={() => toggleActiveTeam(t.teamId)}
+                    />
+                    <span className="swatch" style={{ background: t.hexColor }} />
+                    {t.teamName}
+                  </label>
+                ))}
+              </div>
+              <button onClick={startSession} disabled={activeTeamIds.length < 2}>
+                Start session
+              </button>
+            </>
+          )}
+        </section>
+      </div>
 
+      <div className="admin-group admin-group-game">
       <section>
         <h2>Players</h2>
         <div className="table-scroll">
@@ -217,7 +264,16 @@ export function AdminApp() {
                     <td>{p.tagsReceived}</td>
                     <td>{kd}</td>
                     <td>{p.capturesCompleted}</td>
-                    <td>{p.qrCodeClaimed ? p.qrCodeToken : 'unclaimed'}</td>
+                    <td>
+                      <div className="qr-edit">
+                        <input
+                          value={qrEdits[p.playerId] ?? (p.qrCodeClaimed ? p.qrCodeToken : '')}
+                          onChange={(e) => setQrEdits((edits) => ({ ...edits, [p.playerId]: e.target.value }))}
+                          placeholder="unclaimed"
+                        />
+                        <button onClick={() => setPlayerQrCode(p.playerId)}>Set</button>
+                      </div>
+                    </td>
                     <td>{p.qrCodeClaimed && <QrThumbnail value={encodePlQr(p.qrCodeToken)} size={64} />}</td>
                   </tr>
                 );
@@ -312,6 +368,7 @@ export function AdminApp() {
           </tbody>
         </table>
       </section>
+      </div>
 
       <section>
         <a href="/join-sheet" target="_blank" rel="noreferrer">Print Join Sheet</a>
@@ -319,12 +376,14 @@ export function AdminApp() {
         <a href="/test-qr" target="_blank" rel="noreferrer">Test QR Codes</a>
       </section>
 
-      <section>
-        <h2>Event log</h2>
-        <div className="event-log">
-          {state.eventLog.map((line, i) => <div key={i}>{line}</div>)}
-        </div>
-      </section>
+      <div className="admin-group admin-group-log">
+        <section>
+          <h2>Event log</h2>
+          <div className="event-log">
+            {state.eventLog.map((line, i) => <div key={i}>{line}</div>)}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

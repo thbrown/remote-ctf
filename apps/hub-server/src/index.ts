@@ -70,7 +70,7 @@ async function main() {
   await new Promise<void>((resolve) => nodeApp.listen(config.nodeHttpPort, resolve));
   console.log(`[hub] nodeApp listening on :${config.nodeHttpPort}`);
 
-  const spectatorApp = createSpectatorApp();
+  const spectatorApp = createSpectatorApp(config);
   const spectatorServer = createHttpServer(spectatorApp);
   await new Promise<void>((resolve) => spectatorServer.listen(config.spectatorHttpPort, resolve));
   console.log(`[hub] spectatorApp listening on :${config.spectatorHttpPort}`);

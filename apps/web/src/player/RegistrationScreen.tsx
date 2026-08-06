@@ -90,9 +90,11 @@ export function RegistrationScreen({
         ))}
       </div>
 
-      <button disabled={!canSubmit} onClick={submit}>
-        {submitting ? 'Joining…' : 'Join game'}
-      </button>
+      <div className="continue-row">
+        <button className="continue-button" disabled={!canSubmit} onClick={submit}>
+          {submitting ? 'Joining…' : 'Continue…'}
+        </button>
+      </div>
     </div>
   );
 }

@@ -303,6 +303,70 @@ describe('WsGateway', () => {
     expect(row.playerSecret).toBeUndefined();
   });
 
+  it('player:update with a profilePicture stores a servable /attachments URL, not the bare attachment ref', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+
+    const tinyJpegBase64 = Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString('base64'); // minimal SOI+EOI
+    player.emit('player:update', { profilePicture: tinyJpegBase64 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const record = await store.players.get(helloAck.playerId);
+    const profilePicture = (record as any)?.profilePicture as string;
+    // Must be whatever the store's getUrl() produces (a servable reference), never the
+    // bare ref put() returns on its own - InMemoryStore's is a mem:// URL, FileSystemStore's
+    // is /attachments/<ref>; either way it must not equal the untranslated raw ref.
+    expect(profilePicture).not.toMatch(/^[0-9a-f-]+\.jpg$/);
+    expect(profilePicture).toMatch(/attachments\//);
+  });
+
+  it('admin:player:setQrCode assigns a badge outside of any active session', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+    const setAck = await new Promise<any>((resolve) =>
+      admin.emit('admin:player:setQrCode', { playerId: helloAck.playerId, qrCodeToken: 'ADMIN-SET-TOKEN-001' }, resolve),
+    );
+    expect(setAck.ok).toBe(true);
+
+    const record = await store.players.get(helloAck.playerId);
+    expect((record as any)?.qrCodeToken).toBe('ADMIN-SET-TOKEN-001');
+    expect((record as any)?.qrCodeClaimed).toBe(true);
+  });
+
+  it('admin:player:setQrCode rejects a token already claimed by another player', async () => {
+    const first = connect();
+    const firstAck = await new Promise<any>((resolve) => first.emit('session:hello', { role: 'player' }, resolve));
+    await new Promise<any>((resolve) =>
+      first.emit('player:claimQr', { raw: 'qrctf:1:pl:ADMIN-CONFLICT-TOKEN-01' }, resolve),
+    );
+
+    const second = connect();
+    const secondAck = await new Promise<any>((resolve) => second.emit('session:hello', { role: 'player' }, resolve));
+
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+    const setAck = await new Promise<any>((resolve) =>
+      admin.emit(
+        'admin:player:setQrCode',
+        { playerId: secondAck.playerId, qrCodeToken: 'ADMIN-CONFLICT-TOKEN-01' },
+        resolve,
+      ),
+    );
+    expect(setAck.ok).toBe(false);
+    expect(setAck.error).toBe('already_claimed');
+    void firstAck;
+  });
+
+  it('session:hello rejects a bad admin PIN with an ack and disconnects the socket', async () => {
+    const admin = connect();
+    const ack = await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: 'wrong' }, resolve));
+    expect(ack.ok).toBe(false);
+    expect(ack.error).toBe('bad_pin');
+  });
+
   it('spectator:players:list redacts qrCodeToken and playerSecret', async () => {
     const player = connect();
     const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));

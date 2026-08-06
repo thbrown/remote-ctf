@@ -61,6 +61,14 @@ export const ClaimQrSchema = z.object({
 });
 export type ClaimQrPayload = z.infer<typeof ClaimQrSchema>;
 
+/** Admin override of a player's badge outside of ClaimQrSchema's player-driven scan flow -
+ * e.g. fixing a mis-scanned badge or assigning one ahead of time, with no session required. */
+export const AdminSetPlayerQrSchema = z.object({
+  playerId: z.string(),
+  qrCodeToken: z.string().min(1).max(200),
+});
+export type AdminSetPlayerQrPayload = z.infer<typeof AdminSetPlayerQrSchema>;
+
 // ---- Server -> Client ----
 
 export interface StateSnapshot {

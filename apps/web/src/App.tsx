@@ -17,7 +17,10 @@ export function App() {
     <div className="mode-chooser">
       <h1>Foundry CTF</h1>
       <button onClick={() => setMode('player')}>Join as player</button>
-      <a href={`${location.protocol === 'https:' ? 'http:' : location.protocol}//${location.hostname}:8080/scoreboard`}>
+      <a
+        className="button-link"
+        href={`${location.protocol === 'https:' ? 'http:' : location.protocol}//${location.hostname}:8080/scoreboard`}
+      >
         Join as spectator
       </a>
       <button onClick={() => setMode('admin')}>Admin</button>

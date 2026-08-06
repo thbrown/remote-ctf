@@ -41,6 +41,11 @@ input {
   padding: 60px 20px;
 }
 .mode-chooser a { color: #8fa8ff; margin-top: 20px; }
+.mode-chooser a.button-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1rem; padding: 10px 16px; border-radius: 8px; min-height: 44px;
+  background: #3a48ea; color: white; text-decoration: none;
+}
 
 .player-app { display: flex; flex-direction: column; height: 100vh; }
 .camera-view { position: relative; flex: 1; background: black; overflow: hidden; }
@@ -72,6 +77,8 @@ input {
 
 .registration-screen { display: flex; flex-direction: column; gap: 12px; padding: 24px 20px; max-width: 420px; margin: 0 auto; }
 .registration-screen button:disabled { opacity: 0.6; cursor: default; }
+.continue-row { margin-top: 12px; padding-top: 16px; border-top: 1px solid #333; }
+.continue-button { width: 100%; background: #2a9d5c; font-weight: 600; }
 
 .own-qr-screen { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 24px 20px; text-align: center; }
 .own-qr-camera { position: relative; width: 100%; max-width: 320px; aspect-ratio: 1; background: black; border-radius: 12px; overflow: hidden; }
@@ -80,6 +87,22 @@ input {
 .admin-app { padding: 20px; max-width: 1100px; margin: 0 auto; }
 .admin-login { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px 20px; }
 .admin-app section { margin-bottom: 28px; }
+.admin-app section:last-child { margin-bottom: 0; }
+
+.admin-group {
+  background: #12141a;
+  border: 1px solid #262a35;
+  border-radius: 12px;
+  padding: 4px 20px 20px;
+  margin-bottom: 24px;
+}
+.admin-group-session { border-left: 4px solid #3a48ea; }
+.admin-group-game { border-left: 4px solid #2a9d5c; }
+.admin-group-log { border-left: 4px solid #cc8a2a; }
+
+.qr-edit { display: flex; gap: 6px; align-items: center; }
+.qr-edit input { min-height: 36px; padding: 4px 8px; width: 130px; }
+.qr-edit button { min-height: 36px; padding: 4px 10px; }
 .team-toggle-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
 .team-toggle { display: flex; align-items: center; gap: 8px; }
 .claim-form { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }

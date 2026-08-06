@@ -30,6 +30,10 @@ export interface GameState {
   activeCapture: CaptureProgressState | null;
   lastRejection: ScanRejection | null;
   eventLog: string[];
+  /** Set when session:hello's ack comes back ok:false (e.g. a bad admin PIN) - cleared at
+   * the start of every fresh hello attempt. Admin/spectator only; players always succeed
+   * (they get a fresh identity if their stored one doesn't match). */
+  authError: string | null;
 }
 
 function applyPatch<T extends Record<string, any>>(list: T[], idKey: string, id: string, patch: unknown): T[] {
@@ -58,10 +62,16 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     activeCapture: null,
     lastRejection: null,
     eventLog: [],
+    authError: null,
   }));
   const helloSentRef = useRef(false);
 
   useEffect(() => {
+    // Reset on every effect run (role/adminPin change, e.g. a retry with a corrected PIN)
+    // so a stale success/failure from a previous attempt can't block or misreport a new one.
+    helloSentRef.current = false;
+    setState((s) => (s.authError ? { ...s, authError: null } : s));
+
     function pushLog(line: string) {
       setState((s) => ({ ...s, eventLog: [line, ...s.eventLog].slice(0, 50) }));
     }
@@ -83,6 +93,7 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
           }
           if (ack?.ok === false) {
             pushLog(`Login failed: ${ack.error ?? 'unknown error'}`);
+            setState((s) => ({ ...s, authError: ack.error ?? 'unknown error' }));
           }
         },
       );

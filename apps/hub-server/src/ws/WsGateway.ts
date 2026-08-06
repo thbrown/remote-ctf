@@ -16,6 +16,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Server, Socket } from 'socket.io';
 import {
+  AdminSetPlayerQrSchema,
   CaptureCancelSchema,
   ClaimQrSchema,
   isQrParseError,
@@ -191,7 +192,8 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       if (parsed.data.teamId !== undefined) patch.teamId = parsed.data.teamId;
       if (parsed.data.profilePicture !== undefined) {
         const bytes = Buffer.from(parsed.data.profilePicture, 'base64');
-        patch.profilePicture = await store.attachments.put(bytes, 'image/jpeg'); // HUB-067 size check inside
+        const ref = await store.attachments.put(bytes, 'image/jpeg'); // HUB-067 size check inside
+        patch.profilePicture = await store.attachments.getUrl(ref); // put() returns a bare ref, not a servable URL
       }
       if (Object.keys(patch).length > 0) await store.players.update(state.playerId, patch as any);
     });
@@ -344,6 +346,29 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
         })),
       );
       ack?.({ ok: true, players: roster });
+    });
+
+    // Admin override of a player's badge - independent of an active session, since a
+    // badge should be assignable/fixable at any time (e.g. correcting a mis-scan, or
+    // pre-assigning ahead of a game), unlike the player-driven player:claimQr flow.
+    socket.on('admin:player:setQrCode', async (raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'admin') return;
+      const parsed = AdminSetPlayerQrSchema.safeParse(raw);
+      if (!parsed.success) {
+        ack?.({ ok: false, error: 'invalid_payload' });
+        return;
+      }
+      const claimants = await store.players.list({ qrCodeToken: parsed.data.qrCodeToken } as any);
+      const heldByOther = claimants.some((p: any) => p.playerId !== parsed.data.playerId);
+      if (heldByOther) {
+        ack?.({ ok: false, error: 'already_claimed' });
+        return;
+      }
+      await store.players.update(parsed.data.playerId, {
+        qrCodeToken: parsed.data.qrCodeToken,
+        qrCodeClaimed: true,
+      } as any);
+      ack?.({ ok: true });
     });
 
     // HUB-094-style redaction: the public no-auth scoreboard gets name/team/status/stats/
