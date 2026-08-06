@@ -27,8 +27,10 @@ towards making forward progress and leaving clear notes over stopping to ask.
       registers successfully.
 - [ ] **M1** — `InMemoryStore` + `FileSystemStore` + `TimeSeriesStore` pass one shared
       contract test suite; 8 teams seeded.
-- [ ] **M2** — register → presence → heartbeat → `/set-color` round-trip against the
-      simulator; reconciliation proven by deliberately dropping a push.
+- [x] **M2** — register → presence → heartbeat → `/set-color` round-trip against the
+      simulator; reconciliation proven by deliberately dropping a push. **Done** — see
+      `apps/hub-server/src/nodes/nodeIntegration.test.ts` (automated, both scenarios pass)
+      plus the interactive `tools/sim-control-point` CLI for manual/visual checks.
 - [ ] **M3** — WS snapshot/patch; profile creation with a 128×128 photo; Stats renders
       live; scoreboard page works.
 - [ ] **M4** — Capture (with grace window), Tag, Respawn, 1 Hz scoring, session

@@ -129,4 +129,6 @@ export type ScanRejectReason =
   | 'same_team'
   | 'target_not_active'
   | 'source_not_active'
-  | 'respawn_not_allowed_for_team';
+  | 'not_tagged_out'
+  | 'respawn_not_allowed_for_team'
+  | 'no_active_capture';
