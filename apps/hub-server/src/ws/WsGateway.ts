@@ -338,6 +338,7 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
           playerStatus: p.playerStatus,
           qrCodeToken: p.qrCodeToken,
           qrCodeClaimed: p.qrCodeClaimed,
+          profilePicture: p.profilePicture,
           isConnected: (connectedSocketIdsByPlayerId.get(p.playerId)?.size ?? 0) > 0,
           ...(await getPlayerStats(p.playerId, sessionId)),
         })),
@@ -345,9 +346,10 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       ack?.({ ok: true, players: roster });
     });
 
-    // HUB-094-style redaction: the public no-auth scoreboard gets name/team/status/stats
-    // only - never qrCodeToken (would let anyone forge a tag) or playerSecret (identity
-    // theft) or location.
+    // HUB-094-style redaction: the public no-auth scoreboard gets name/team/status/stats/
+    // photo - never qrCodeToken (would let anyone forge a tag) or playerSecret (identity
+    // theft) or location. profilePicture is already public/no-auth via /attachments
+    // (deviceApp.ts), so no new exposure - just the URL, which is otherwise unguessable.
     socket.on('spectator:players:list', async (_raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'spectator') return;
       const players = await store.players.list({ stationId } as any);
@@ -359,6 +361,7 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
           playerName: p.playerName,
           teamId: p.teamId,
           playerStatus: p.playerStatus,
+          profilePicture: p.profilePicture,
           isConnected: (connectedSocketIdsByPlayerId.get(p.playerId)?.size ?? 0) > 0,
           ...(await getPlayerStats(p.playerId, sessionId)),
         })),

@@ -89,3 +89,4 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #333; }
 .player-row-disconnected { opacity: 0.45; }
 .player-row-disconnected td { font-style: italic; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: block; }

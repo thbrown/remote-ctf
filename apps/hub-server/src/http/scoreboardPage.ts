@@ -37,6 +37,7 @@ export const SCOREBOARD_HTML = `<!doctype html>
   #players th, #players td { text-align: left; padding: 8px 14px; border-bottom: 1px solid #262a33; white-space: nowrap; }
   #players th { font-size: 0.85rem; opacity: 0.7; font-weight: 600; text-transform: uppercase; }
   #players .player-name-cell { display: flex; align-items: center; gap: 10px; }
+  .avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex: none; background: #333; }
   .player-status.tagged_out { color: #ff8080; }
   .player-row-disconnected { opacity: 0.4; font-style: italic; }
   #ticker { font-size: 1.1rem; opacity: 0.85; line-height: 1.6; max-height: 200px; overflow-y: auto; }
@@ -100,11 +101,14 @@ export const SCOREBOARD_HTML = `<!doctype html>
       playersBodyEl.innerHTML = sortedPlayers.map((p) => {
         const team = p.teamId ? teamById(p.teamId) : null;
         const kd = p.tagsReceived === 0 ? (p.tagsInflicted === 0 ? '—' : '∞') : (p.tagsInflicted / p.tagsReceived).toFixed(2);
+        const avatar = p.profilePicture
+          ? \`<img class="avatar" src="\${p.profilePicture}" alt="" />\`
+          : \`<div class="avatar" style="background:\${team ? team.hexColor : '#555'}"></div>\`;
         return \`
         <tr class="\${p.isConnected ? '' : 'player-row-disconnected'}">
           <td>
             <div class="player-name-cell">
-              <div class="swatch" style="background:\${team ? team.hexColor : '#555'}"></div>
+              \${avatar}
               \${p.playerName}\${p.isConnected ? '' : ' (disconnected)'}
             </div>
           </td>

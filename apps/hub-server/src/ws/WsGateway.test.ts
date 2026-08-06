@@ -319,6 +319,19 @@ describe('WsGateway', () => {
     expect(row.playerSecret).toBeUndefined();
   });
 
+  it('spectator:players:list includes profilePicture', async () => {
+    const player = connect();
+    const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(helloAck.playerId, { profilePicture: '/attachments/abc123.jpg' } as any);
+
+    const spectator = connect();
+    await new Promise<any>((resolve) => spectator.emit('session:hello', { role: 'spectator' }, resolve));
+    const listAck = await new Promise<any>((resolve) => spectator.emit('spectator:players:list', {}, resolve));
+
+    const row = listAck.players.find((p: any) => p.playerId === helloAck.playerId);
+    expect(row.profilePicture).toBe('/attachments/abc123.jpg');
+  });
+
   it('admin:players:list reports isConnected, flipping to false after disconnect', async () => {
     const player = connect();
     const helloAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));

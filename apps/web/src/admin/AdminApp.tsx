@@ -27,6 +27,7 @@ interface PlayerRow {
   playerStatus: string;
   qrCodeToken: string;
   qrCodeClaimed: boolean;
+  profilePicture: string | null;
   isConnected: boolean;
   tagsInflicted: number;
   tagsReceived: number;
@@ -182,7 +183,7 @@ export function AdminApp() {
           <table>
             <thead>
               <tr>
-                <th>Name</th><th>Team</th><th>Status</th><th>Connected</th>
+                <th>Photo</th><th>Name</th><th>Team</th><th>Status</th><th>Connected</th>
                 <th>Tags for</th><th>Tags against</th><th>K/D</th><th>Points captured</th>
                 <th>QR code ID</th><th>Badge</th>
               </tr>
@@ -193,6 +194,13 @@ export function AdminApp() {
                 const kd = p.tagsReceived === 0 ? (p.tagsInflicted === 0 ? '—' : '∞') : (p.tagsInflicted / p.tagsReceived).toFixed(2);
                 return (
                   <tr key={p.playerId} className={p.isConnected ? '' : 'player-row-disconnected'}>
+                    <td>
+                      {p.profilePicture ? (
+                        <img className="avatar" src={p.profilePicture} alt="" />
+                      ) : (
+                        <span className="avatar" style={{ background: team?.hexColor ?? '#555' }} />
+                      )}
+                    </td>
                     <td>{p.playerName}</td>
                     <td>
                       {team ? (
