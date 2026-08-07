@@ -59,5 +59,13 @@ cd "${SCRIPT_DIR}/.."
 echo "[run-hub] Building all workspaces..."
 pnpm -r build
 
-echo "[run-hub] PUBLIC_ORIGIN=${PUBLIC_ORIGIN}"
+echo "[run-hub] PUBLIC_ORIGIN=${PUBLIC_ORIGIN} - this is what players' devices on the game"
+echo "[run-hub]   Wi-Fi should open. It only resolves/routes correctly from a client on"
+echo "[run-hub]   that AP - NOT from the Hub itself (the :80/:443 -> unprivileged-port"
+echo "[run-hub]   iptables redirect only rewrites inbound traffic on ${AP_IFACE:-wlan1},"
+echo "[run-hub]   never traffic the Hub generates for itself)."
+echo "[run-hub] Testing from the Hub's own browser instead? Use"
+echo "[run-hub]   https://localhost:${DEVICE_HTTPS_PORT} directly - expect a cert-name-"
+echo "[run-hub]   mismatch warning there even with a real cert, since it won't cover"
+echo "[run-hub]   'localhost' or the bare IP, only ${DOMAIN:-the configured domain}."
 exec pnpm --filter @foundry-ctf/hub-server start
