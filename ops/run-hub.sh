@@ -18,9 +18,15 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+REPO_ROOT="${SCRIPT_DIR}/.."
+
 AP_IP="${AP_IP:-10.0.0.1}"
 DOMAIN="${DOMAIN:-ctf.endlesswips.com}"
-CERT_LIVE_DIR="./ops/certs/config/live/${DOMAIN}"
+# Absolute path: `pnpm --filter ... start` below runs with its cwd set to
+# apps/hub-server/, not the repo root, so a relative path here would resolve
+# against the wrong directory and the Hub would fail to find the cert files.
+CERT_LIVE_DIR="${REPO_ROOT}/ops/certs/config/live/${DOMAIN}"
 
 export NODE_ENV=production
 export ADMIN_PIN="${ADMIN_PIN:-1234}"
@@ -47,8 +53,7 @@ if [[ "${ADMIN_PIN}" == "1234" ]]; then
   echo "[run-hub] WARNING: using default ADMIN_PIN=1234 - fine for testing, change it for a real game." >&2
 fi
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-cd "${SCRIPT_DIR}/.."
+cd "${REPO_ROOT}"
 
 # `pnpm start` runs the prebuilt apps/hub-server/dist/, which does NOT rebuild itself -
 # after a `git pull` that's stale code silently, with no error. Always rebuild every
