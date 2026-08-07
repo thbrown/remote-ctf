@@ -116,6 +116,15 @@ async function main() {
   await new Promise<void>((resolve) => httpsServer.listen(config.deviceHttpsPort, resolve));
   console.log(`[hub] deviceApp listening on :${config.deviceHttpsPort} (${config.publicOrigin})`);
   console.log('[hub] ready');
+
+  // Scoreboard lives on spectatorApp's own plain-HTTP port, not behind publicOrigin/TLS -
+  // reuse publicOrigin's hostname since that's already the right thing to hand to players
+  // (LAN IP or the real domain, whichever's configured), just with a different port/scheme.
+  const scoreboardUrl = `http://${new URL(config.publicOrigin).hostname}:${config.spectatorHttpPort}/scoreboard`;
+  console.log(`[hub]   Main page:     ${config.publicOrigin}`);
+  console.log(`[hub]   Join sheet:    ${config.publicOrigin}/join-sheet`);
+  console.log(`[hub]   Test QR codes: ${config.publicOrigin}/test-qr`);
+  console.log(`[hub]   Scoreboard:    ${scoreboardUrl}`);
 }
 
 main().catch((err) => {
