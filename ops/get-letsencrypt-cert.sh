@@ -48,15 +48,20 @@ if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   exit 1
 fi
 
-if ! command -v certbot >/dev/null 2>&1; then
-  log "certbot not found - installing via pip..."
-  python3 -m pip install --user --quiet certbot certbot-dns-cloudflare
-  export PATH="${HOME}/.local/bin:${PATH}"
-fi
-
-if ! certbot plugins 2>/dev/null | grep -q dns-cloudflare; then
-  log "certbot-dns-cloudflare plugin not found - installing via pip..."
-  python3 -m pip install --user --quiet certbot-dns-cloudflare
+if ! command -v certbot >/dev/null 2>&1 || ! certbot plugins 2>/dev/null | grep -q dns-cloudflare; then
+  if command -v apt-get >/dev/null 2>&1; then
+    # Debian/Raspberry Pi OS (Bookworm+) mark system pip "externally managed" (PEP 668)
+    # and refuse a plain `pip install`, so prefer the apt packages here - they also
+    # cover certbot's own dependencies without needing a venv.
+    log "Installing certbot + certbot-dns-cloudflare via apt..."
+    sudo apt-get update -qq
+    sudo apt-get install -y certbot python3-certbot-dns-cloudflare
+  else
+    log "certbot not found - installing via pip..."
+    python3 -m pip install --user --quiet --break-system-packages certbot certbot-dns-cloudflare \
+      || python3 -m pip install --user --quiet certbot certbot-dns-cloudflare
+    export PATH="${HOME}/.local/bin:${PATH}"
+  fi
 fi
 
 CRED_DIR="$(mktemp -d)"
