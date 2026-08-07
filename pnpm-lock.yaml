@@ -111,6 +111,28 @@ importers:
         specifier: 1.6.0
         version: 1.6.0(@types/node@20.14.2)
 
+  tools/badge-pdf:
+    dependencies:
+      '@foundry-ctf/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      qrcode:
+        specifier: 1.5.3
+        version: 1.5.3
+    devDependencies:
+      '@types/node':
+        specifier: 20.14.2
+        version: 20.14.2
+      '@types/qrcode':
+        specifier: 1.5.5
+        version: 1.5.5
+      tsx:
+        specifier: 4.15.6
+        version: 4.15.6
+      typescript:
+        specifier: 5.4.5
+        version: 5.4.5
+
   tools/sim-control-point:
     dependencies:
       express:

@@ -1,0 +1,20 @@
+{
+  "name": "@foundry-ctf/badge-pdf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate:players": "tsx src/generatePlayers.ts",
+    "generate:respawns": "tsx src/generateRespawns.ts"
+  },
+  "dependencies": {
+    "@foundry-ctf/shared": "workspace:*",
+    "qrcode": "1.5.3"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.2",
+    "@types/qrcode": "1.5.5",
+    "tsx": "4.15.6",
+    "typescript": "5.4.5"
+  }
+}

@@ -20,6 +20,8 @@ See `PROGRESS.md` for current build status and `docs/` for the normative specs:
 - `packages/shared` — types/protocol shared between server and web app
 - `tools/sim-control-point` — simulates a Control Point node for testing without hardware
 - `tools/mock-hub` — mock Hub for firmware-side testing
+- `tools/badge-pdf` — generates printable player badge / respawn point QR code PDFs (see
+  [Generating printable QR codes](#generating-printable-qr-codes))
 
 ## Prerequisites
 
@@ -132,6 +134,31 @@ for the full list and defaults). The ones you're most likely to set for a real d
    hardware, once built per `docs/02-FIRMWARE.md`) can register against it. `/test-qr`
    (linked from the Admin app) has sample player/respawn QR codes for testing scans
    without needing real players or hardware — see the page itself for how to use it.
+
+## Generating printable QR codes
+
+`tools/badge-pdf` generates print-ready PDFs of the `pl` (player badge) and `rp` (respawn
+point) QR codes (see `docs/00-WIRE-CONTRACT.md` CON-030..033 for the payload scheme). QR
+codes are drawn as vector fills, not raster images, so they print crisp at any size. Output
+goes to `ops/printables/`.
+
+```bash
+pnpm --filter @foundry-ctf/badge-pdf generate:players [playerCount]   # default 12, IDs p1..pN
+pnpm --filter @foundry-ctf/badge-pdf generate:respawns [respawnCount] # default 6,  IDs r1..rN
+```
+
+- **Player badges** (`ops/printables/player-badges.pdf`): one page per player, each with a
+  large FRONT badge, a large BACK badge, and two smaller ARM PATCH badges - all four
+  encoding that player's fixed `qrCodeToken` (`pN`). These are exactly what a real
+  pre-printed badge is: unclaimed until a player scans one during onboarding
+  (`ClaimBadgeScreen` → `player:claimQr`), at which point that code becomes their
+  qrCodeToken. First scan claims it; later scans of the same badge from another player are
+  rejected (`already_claimed`).
+- **Respawn points** (`ops/printables/respawn-points.pdf`): one page per respawn location,
+  each a single large QR code plus its Custom ID (`rN`) printed underneath. These only
+  resolve once a respawn location with the matching ID exists in the Hub - open Admin →
+  Respawn Points and create one per sign, entering the same Custom ID printed on the sign
+  (any lat/long works; the QR is what's scanned during play).
 
 ## Tests
 
