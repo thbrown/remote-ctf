@@ -11,13 +11,29 @@
 # Override AP_IP/ADMIN_PIN via env vars, same as setup-pi-ap.sh:
 #   AP_IP=10.0.0.1 ADMIN_PIN=1234 ./ops/run-hub.sh
 #
+# If ops/get-letsencrypt-cert.sh has already produced a cert for DOMAIN (default
+# ctf.endlesswips.com), it's picked up automatically - TLS_MODE=provided plus
+# PUBLIC_ORIGIN pointed at the domain instead of AP_IP. Set TLS_MODE explicitly to
+# override (e.g. TLS_MODE=selfsigned to force the fallback even with a cert present).
+#
 set -euo pipefail
 
 AP_IP="${AP_IP:-10.0.0.1}"
+DOMAIN="${DOMAIN:-ctf.endlesswips.com}"
+CERT_LIVE_DIR="./ops/certs/config/live/${DOMAIN}"
 
 export NODE_ENV=production
-export PUBLIC_ORIGIN="${PUBLIC_ORIGIN:-https://${AP_IP}}"
 export ADMIN_PIN="${ADMIN_PIN:-1234}"
+
+if [[ -z "${TLS_MODE:-}" && -f "${CERT_LIVE_DIR}/fullchain.pem" && -f "${CERT_LIVE_DIR}/privkey.pem" ]]; then
+  echo "[run-hub] Found Let's Encrypt cert for ${DOMAIN} - using TLS_MODE=provided." >&2
+  export TLS_MODE=provided
+  export TLS_CERT_PATH="${TLS_CERT_PATH:-${CERT_LIVE_DIR}/fullchain.pem}"
+  export TLS_KEY_PATH="${TLS_KEY_PATH:-${CERT_LIVE_DIR}/privkey.pem}"
+  export PUBLIC_ORIGIN="${PUBLIC_ORIGIN:-https://${DOMAIN}}"
+else
+  export PUBLIC_ORIGIN="${PUBLIC_ORIGIN:-https://${AP_IP}}"
+fi
 
 # Bind unprivileged ports (8000/8443) instead of production's
 # default :80/:443 - ops/setup-pi-ap.sh installs an iptables redirect from
