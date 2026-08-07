@@ -2,6 +2,7 @@ node_modules/
 dist/
 data/
 !data/.gitkeep
+ops/certs/
 *.log
 .DS_Store
 .env
