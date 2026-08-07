@@ -29,7 +29,10 @@ export async function renderTestQrHtml(): Promise<string> {
   const playerCards = TEST_PLAYER_TOKENS.map(
     (token, i) => `
     <div class="card">
-      <img src="${playerQrs[i]}" width="260" height="260" alt="Test player badge ${i + 1}" />
+      <div class="qr-wrap">
+        <img src="${playerQrs[i]}" width="260" height="260" alt="Test player badge ${i + 1}" />
+        <div class="qr-veil">hover to reveal</div>
+      </div>
       <div><strong>Test badge ${i + 1}</strong></div>
       <div><code>${encodePlQr(token)}</code></div>
     </div>`,
@@ -38,7 +41,10 @@ export async function renderTestQrHtml(): Promise<string> {
   const respawnCards = TEST_RESPAWN_IDS.map(
     (id, i) => `
     <div class="card">
-      <img src="${respawnQrs[i]}" width="260" height="260" alt="Test respawn QR ${i + 1}" />
+      <div class="qr-wrap">
+        <img src="${respawnQrs[i]}" width="260" height="260" alt="Test respawn QR ${i + 1}" />
+        <div class="qr-veil">hover to reveal</div>
+      </div>
       <div><strong>Test respawn ${i + 1}</strong></div>
       <div><code>${encodeRpQr(id)}</code></div>
       <div class="hint">Admin → Respawn Locations → Custom ID: <code>${id}</code></div>
@@ -56,11 +62,27 @@ export async function renderTestQrHtml(): Promise<string> {
   h2 { margin-top: 40px; }
   .row { display: flex; gap: 24px; margin: 24px 0; flex-wrap: wrap; }
   .card { border: 1px solid #ccc; border-radius: 12px; padding: 16px; text-align: center; max-width: 280px; }
-  .card img { display: block; margin: 0 auto 12px; background: white; }
+  .card img { display: block; background: white; }
   .hint { margin-top: 8px; font-size: 0.85rem; color: #555; }
   code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; word-break: break-all; }
   .instructions { margin-top: 8px; font-size: 0.95rem; line-height: 1.6; }
-  @media print { body { padding: 0; } }
+
+  /* Blurred by default so a phone camera aimed at the screen can't pick up neighboring
+     codes - hover the one you want to scan to reveal it. */
+  .qr-wrap { position: relative; width: 260px; height: 260px; margin: 0 auto 12px; }
+  .qr-wrap img { width: 100%; height: 100%; filter: blur(14px); transition: filter 0.15s ease; }
+  .qr-veil {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.55); border-radius: 8px; font-size: 0.85rem; color: #333;
+    transition: opacity 0.15s ease; pointer-events: none;
+  }
+  .qr-wrap:hover img { filter: none; }
+  .qr-wrap:hover .qr-veil { opacity: 0; }
+  @media print {
+    body { padding: 0; }
+    .qr-wrap img { filter: none; }
+    .qr-veil { display: none; }
+  }
 </style>
 </head>
 <body>
