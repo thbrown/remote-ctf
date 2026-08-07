@@ -1,7 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { encodePlQr, encodeRpQr, isQrParseError, parseQr } from '@foundry-ctf/shared';
+import { formatRelativeTime, useNowTick } from '../relativeTime';
 import { useGame } from '../useGame';
 import { AdminQrScanner } from './AdminQrScanner';
+import {
+  playNodeConnectedFeedback,
+  playNodeDisconnectedFeedback,
+  playPlayerConnectedFeedback,
+  playPlayerDisconnectedFeedback,
+} from './feedback';
 import { QrThumbnail } from './QrThumbnail';
 
 interface NodeRow {
@@ -73,6 +80,7 @@ function AdminSection({ title, tone, children }: { title: string; tone: SectionT
 }
 
 export function AdminApp() {
+  const now = useNowTick();
   const [pin, setPin] = useState('');
   // Deliberately separate from `pin` (which tracks every keystroke): only updates when
   // "Enter" is clicked, so useGame's effect (keyed on this value) doesn't re-send
@@ -84,6 +92,8 @@ export function AdminApp() {
   const [nodes, setNodes] = useState<NodeRow[]>([]);
   const [claimMac, setClaimMac] = useState('');
   const [claimName, setClaimName] = useState('');
+  const [claimLat, setClaimLat] = useState('');
+  const [claimLong, setClaimLong] = useState('');
   const [respawnLocations, setRespawnLocations] = useState<RespawnLocationRow[]>([]);
   const [rpLat, setRpLat] = useState('');
   const [rpLong, setRpLong] = useState('');
@@ -99,15 +109,47 @@ export function AdminApp() {
     });
   }
 
+  // Previous poll's connectivity, keyed by mac/playerId - compared against each new poll to
+  // detect connect/disconnect transitions and fire the matching sound. null until the first
+  // poll lands, so that initial roster load doesn't fire a burst of connect sounds.
+  const prevNodeOnlineRef = useRef<Map<string, boolean> | null>(null);
+  const prevPlayerConnectedRef = useRef<Map<string, boolean> | null>(null);
+
   useEffect(() => {
     if (state.status !== 'connected' || submittedPin === undefined) return;
     refreshRespawnLocations();
     function pollNodesAndPlayers() {
       socket.emit('admin:nodes:list', {}, (res: any) => {
-        if (res?.ok) setNodes(res.nodes);
+        if (!res?.ok) return;
+        const nodeRows: NodeRow[] = res.nodes;
+        setNodes(nodeRows);
+        const prev = prevNodeOnlineRef.current;
+        const next = new Map(nodeRows.map((n) => [n.mac, n.isOnline]));
+        if (prev) {
+          for (const n of nodeRows) {
+            const was = prev.get(n.mac);
+            if (was === undefined) continue;
+            if (was && !n.isOnline) playNodeDisconnectedFeedback();
+            else if (!was && n.isOnline) playNodeConnectedFeedback();
+          }
+        }
+        prevNodeOnlineRef.current = next;
       });
       socket.emit('admin:players:list', {}, (res: any) => {
-        if (res?.ok) setPlayers(res.players);
+        if (!res?.ok) return;
+        const playerRows: PlayerRow[] = res.players;
+        setPlayers(playerRows);
+        const prev = prevPlayerConnectedRef.current;
+        const next = new Map(playerRows.map((p) => [p.playerId, p.isConnected]));
+        if (prev) {
+          for (const p of playerRows) {
+            const was = prev.get(p.playerId);
+            if (was === undefined) continue;
+            if (was && !p.isConnected) playPlayerDisconnectedFeedback();
+            else if (!was && p.isConnected) playPlayerConnectedFeedback();
+          }
+        }
+        prevPlayerConnectedRef.current = next;
       });
     }
     pollNodesAndPlayers();
@@ -138,6 +180,18 @@ export function AdminApp() {
         return;
       }
       setClaimMac(qr.macAddress);
+      // Best-effort: fill lat/long from wherever the admin is standing when they scan it,
+      // same as the Respawn Point flow below - not fatal if denied/unavailable.
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            setClaimLat(String(pos.coords.latitude));
+            setClaimLong(String(pos.coords.longitude));
+          },
+          () => {},
+          { timeout: 5000 },
+        );
+      }
     } else if (kind === 'rp') {
       if (qr.kind !== 'rp') {
         alert("That's not a Respawn Point QR code.");
@@ -220,17 +274,32 @@ export function AdminApp() {
   }
 
   function claimNode() {
-    socket.emit('admin:node:claim', { macAddress: claimMac, controlPointName: claimName || undefined }, (res: any) => {
-      if (!res?.ok) alert(`Failed to claim: ${res?.error}`);
-      else {
-        setClaimMac('');
-        setClaimName('');
-      }
-    });
+    const lat = claimLat.trim() ? Number(claimLat) : undefined;
+    const long = claimLong.trim() ? Number(claimLong) : undefined;
+    if ((lat !== undefined && !Number.isFinite(lat)) || (long !== undefined && !Number.isFinite(long))) {
+      alert('lat/long must be numbers');
+      return;
+    }
+    socket.emit(
+      'admin:node:claim',
+      { macAddress: claimMac, controlPointName: claimName || undefined, lat, long },
+      (res: any) => {
+        if (!res?.ok) alert(`Failed to claim: ${res?.error}`);
+        else {
+          setClaimMac('');
+          setClaimName('');
+          setClaimLat('');
+          setClaimLong('');
+        }
+      },
+    );
   }
 
   function identifyNode(mac: string) {
-    socket.emit('admin:node:identify', { macAddress: mac }, () => {});
+    socket.emit('admin:node:identify', { macAddress: mac }, (res: any) => {
+      if (res?.ok) alert('Identify sent — the node should blink white for ~3s.');
+      else alert('Could not reach that node — it may be offline.');
+    });
   }
 
   function toggleRpTeam(teamId: string) {
@@ -310,7 +379,7 @@ export function AdminApp() {
                 const team = p.teamId ? state.teams.find((t) => t.teamId === p.teamId) : null;
                 const kd = p.tagsReceived === 0 ? (p.tagsInflicted === 0 ? '—' : '∞') : (p.tagsInflicted / p.tagsReceived).toFixed(2);
                 return (
-                  <tr key={p.playerId} className={p.isConnected ? '' : 'player-row-disconnected'}>
+                  <tr key={p.playerId} className={p.isConnected ? '' : 'row-disconnected'}>
                     <td>
                       {p.profilePicture ? (
                         <img className="avatar" src={p.profilePicture} alt="" />
@@ -357,17 +426,41 @@ export function AdminApp() {
       <AdminSection title="Control Points" tone="nodes">
         <table>
           <thead>
-            <tr><th>Name</th><th>MAC</th><th>Owner</th><th>Presence</th></tr>
+            <tr>
+              <th>Name</th><th>MAC</th><th>Owner</th><th>Presence</th><th>Connected</th>
+              <th title="Hub wants (desired) / Node confirms (reported) - Node may lag Hub by a few seconds">LED</th>
+              <th>Lat/Long</th><th>RSSI</th><th></th>
+            </tr>
           </thead>
           <tbody>
             {state.controlPoints.map((cp) => {
               const owner = cp.currentOwnerTeamId ? state.teams.find((t) => t.teamId === cp.currentOwnerTeamId) : null;
+              const node = cp.macAddress ? nodes.find((n) => n.mac === cp.macAddress) : undefined;
+              const connected = node?.isOnline ?? false;
               return (
-                <tr key={cp.controlPointId}>
+                <tr key={cp.controlPointId} className={connected ? '' : 'row-disconnected'}>
                   <td>{cp.controlPointName}</td>
                   <td>{cp.macAddress ?? '—'}</td>
                   <td>{owner ? owner.teamName : 'Neutral'}</td>
                   <td>{cp.isHumanDetected ? 'detected' : 'clear'}</td>
+                  <td>{node ? (connected ? 'connected' : 'disconnected') : '—'}</td>
+                  <td>
+                    {node ? (
+                      <span className="led-pair">
+                        <span className="led-swatch" title="Hub wants the LED set to this">
+                          <span className="swatch" style={{ background: node.desiredColor }} /> Hub
+                        </span>
+                        <span className="led-swatch" title="Node last confirmed this back - may lag Hub by a few seconds">
+                          {node.reportedColor && <span className="swatch" style={{ background: node.reportedColor }} />} Node
+                        </span>
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td>{cp.locationLat != null && cp.locationLong != null ? `${cp.locationLat.toFixed(5)}, ${cp.locationLong.toFixed(5)}` : '—'}</td>
+                  <td>{node?.rssi ?? '—'}</td>
+                  <td>{node && <button className="btn-ghost" onClick={() => identifyNode(node.mac)}>Identify</button>}</td>
                 </tr>
               );
             })}
@@ -378,28 +471,33 @@ export function AdminApp() {
         <div className="claim-form">
           <input value={claimMac} onChange={(e) => setClaimMac(e.target.value)} placeholder="MAC address (AA:BB:CC:DD:EE:FF)" />
           <input value={claimName} onChange={(e) => setClaimName(e.target.value)} placeholder="Control Point name" />
+          <input value={claimLat} onChange={(e) => setClaimLat(e.target.value)} placeholder="Latitude" />
+          <input value={claimLong} onChange={(e) => setClaimLong(e.target.value)} placeholder="Longitude" />
           <button className="btn-ghost" onClick={() => setScanning('cp')}>Scan QR</button>
           <button onClick={claimNode}>Claim</button>
         </div>
-        <table>
-          <thead>
-            <tr><th>MAC</th><th>IP</th><th>Online</th><th>Claimed</th><th>Desired</th><th>Reported</th><th>RSSI</th><th></th></tr>
-          </thead>
-          <tbody>
-            {nodes.map((n) => (
-              <tr key={n.mac}>
-                <td>{n.mac}</td>
-                <td>{n.ip}</td>
-                <td>{n.isOnline ? 'online' : 'offline'}</td>
-                <td>{n.controlPointId ? 'yes' : 'no'}</td>
-                <td><span className="swatch" style={{ background: n.desiredColor }} /></td>
-                <td>{n.reportedColor && <span className="swatch" style={{ background: n.reportedColor }} />}</td>
-                <td>{n.rssi ?? '—'}</td>
-                <td><button className="btn-ghost" onClick={() => identifyNode(n.mac)}>Identify</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+        {nodes.some((n) => !n.controlPointId) && (
+          <>
+            <h3>Unclaimed nodes seen on the network</h3>
+            <table>
+              <thead>
+                <tr><th>MAC</th><th>IP</th><th>Connected</th><th>RSSI</th><th></th></tr>
+              </thead>
+              <tbody>
+                {nodes.filter((n) => !n.controlPointId).map((n) => (
+                  <tr key={n.mac} className={n.isOnline ? '' : 'row-disconnected'}>
+                    <td>{n.mac}</td>
+                    <td>{n.ip}</td>
+                    <td>{n.isOnline ? 'connected' : 'disconnected'}</td>
+                    <td>{n.rssi ?? '—'}</td>
+                    <td><button className="btn-ghost" onClick={() => setClaimMac(n.mac)}>Use for claim</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
       </AdminSection>
 
       <AdminSection title="Respawn Points" tone="respawn">
@@ -449,7 +547,11 @@ export function AdminApp() {
 
       <AdminSection title="Event log" tone="log">
         <div className="event-log">
-          {state.eventLog.map((line, i) => <div key={i}>{line}</div>)}
+          {state.eventLog.map((entry) => (
+            <div key={entry.id}>
+              <span className="event-log-time">{formatRelativeTime(entry.atMs, now)}</span> — {entry.text}
+            </div>
+          ))}
         </div>
       </AdminSection>
     </div>

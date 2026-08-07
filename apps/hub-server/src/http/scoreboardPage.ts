@@ -42,6 +42,7 @@ export const SCOREBOARD_HTML = `<!doctype html>
   .player-row-disconnected { opacity: 0.4; font-style: italic; }
   #ticker { font-size: 1.1rem; opacity: 0.85; line-height: 1.6; max-height: 200px; overflow-y: auto; }
   #ticker div { border-left: 3px solid #444; padding-left: 10px; margin-bottom: 6px; }
+  .ticker-time { opacity: 0.6; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -72,6 +73,8 @@ export const SCOREBOARD_HTML = `<!doctype html>
     let players = [];
 
     function teamById(id) { return teams.find((t) => t.teamId === id); }
+    function playerById(id) { return players.find((p) => p.playerId === id); }
+    function cpById(id) { return controlPoints.find((c) => c.controlPointId === id); }
 
     function render() {
       const teamsWithPlayers = teams.filter((t) => players.some((p) => p.teamId === t.teamId));
@@ -138,13 +141,25 @@ export const SCOREBOARD_HTML = `<!doctype html>
       });
     }
 
-    function ticker(text) {
-      const el = document.getElementById('ticker');
-      const line = document.createElement('div');
-      line.textContent = new Date().toLocaleTimeString() + ' — ' + text;
-      el.prepend(line);
-      while (el.children.length > 30) el.removeChild(el.lastChild);
+    let tickerEntries = [];
+    function formatRelativeTime(atMs) {
+      const deltaS = Math.max(0, Math.round((Date.now() - atMs) / 1000));
+      if (deltaS < 1) return 'just now';
+      if (deltaS < 60) return deltaS + 's ago';
+      const deltaM = Math.round(deltaS / 60);
+      if (deltaM < 60) return deltaM + 'm ago';
+      return Math.round(deltaM / 60) + 'h ago';
     }
+    function renderTicker() {
+      const el = document.getElementById('ticker');
+      el.innerHTML = tickerEntries.map((e) => \`<div><span class="ticker-time">\${formatRelativeTime(e.atMs)}</span> — \${e.text}</div>\`).join('');
+    }
+    function ticker(text) {
+      tickerEntries.unshift({ atMs: Date.now(), text });
+      tickerEntries = tickerEntries.slice(0, 30);
+      renderTicker();
+    }
+    setInterval(renderTicker, 1000);
 
     socket.on('connect', () => {
       socket.emit('session:hello', { role: 'spectator' }, () => {});
@@ -180,13 +195,27 @@ export const SCOREBOARD_HTML = `<!doctype html>
     });
 
     socket.on('session:started', () => ticker('Session started'));
-    socket.on('session:ended', (e) => ticker('Session ended. Winner: ' + (teamById(e.winningTeamId)?.teamName ?? 'none')));
+    socket.on('session:ended', (e) => {
+      ticker('Session ended. Winner: ' + (teamById(e.winningTeamId)?.teamName ?? 'none'));
+      session = null;
+      render();
+    });
+    socket.on('capture:started', (e) => {
+      const cp = cpById(e.controlPointId);
+      const player = playerById(e.playerId);
+      ticker((player?.playerName ?? 'A player') + ' started capturing ' + (cp?.controlPointName ?? 'a control point'));
+    });
     socket.on('capture:completed', (e) => {
       const cp = controlPoints.find((c) => c.controlPointId === e.controlPointId);
       const team = teamById(e.teamId);
       ticker((cp?.controlPointName ?? 'A control point') + ' captured by ' + (team?.teamName ?? 'a team'));
     });
     socket.on('capture:abandoned', () => ticker('A capture attempt was abandoned'));
+    socket.on('tag:occurred', (e) => {
+      const source = playerById(e.sourcePlayerId);
+      const target = playerById(e.targetPlayerId);
+      ticker((source?.playerName ?? 'A player') + ' tagged ' + (target?.playerName ?? 'a player'));
+    });
   </script>
 </body>
 </html>`;

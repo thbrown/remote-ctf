@@ -95,7 +95,7 @@ Called on every boot, and again after every Wi-Fi reconnect.
   "controlPointId": "cp_7f3a",     // null when claimed = false
   "hexColor": "#3A48EA",
   "pattern": "solid",
-  "heartbeatIntervalMs": 15000
+  "heartbeatIntervalMs": 5000
 }
 ```
 
@@ -139,7 +139,7 @@ transition.
 
 ### `POST /api/cp/heartbeat`
 
-Called every `heartbeatIntervalMs` (default 15000 ms, taken from the register response).
+Called every `heartbeatIntervalMs` (default 5000 ms, taken from the register response).
 
 ```jsonc
 // request
@@ -156,7 +156,7 @@ Called every `heartbeatIntervalMs` (default 15000 ms, taken from the register re
   "controlPointId": "cp_7f3a",
   "hexColor": "#3A48EA",         // what the Node SHOULD be showing
   "pattern": "solid",
-  "heartbeatIntervalMs": 15000
+  "heartbeatIntervalMs": 5000
 }
 ```
 

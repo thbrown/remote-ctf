@@ -158,7 +158,7 @@ for a new venue is a one-file edit:
 #define CTF_HUB_IP           "10.0.0.1"     // Q-A — hardcoded IP, never DNS (CON-003)
 #define CTF_HUB_PORT         3000
 #define CTF_FW_VERSION       "1.0.0"
-#define CTF_HEARTBEAT_MS     15000          // overridden by the register response
+#define CTF_HEARTBEAT_MS     5000           // overridden by the register response
 #define CTF_DEBOUNCE_MS      500
 #define CTF_HTTP_TIMEOUT_MS  2000
 #define CTF_NODE_HTTP_PORT   80

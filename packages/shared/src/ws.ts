@@ -87,6 +87,7 @@ export interface StatePatch {
 export interface CaptureStartedEvent {
   captureId: string;
   controlPointId: string;
+  playerId: string;
   durationMs: number;
   startedAtMs: number;
 }
@@ -111,6 +112,17 @@ export interface CaptureAbandonedEvent {
 export interface TagEvent {
   tagId: string;
   otherPlayerId: string;
+}
+
+/** Public, PII-light broadcast to the spectators room only - unlike TagEvent (delivered
+ * privately to each side's own player room), this is what lets the scoreboard ticker show
+ * "X tagged Y" at all. */
+export interface TagOccurredEvent {
+  tagId: string;
+  sourcePlayerId: string;
+  targetPlayerId: string;
+  sourceTeamId: string;
+  targetTeamId: string;
 }
 
 export interface RespawnCompletedEvent {

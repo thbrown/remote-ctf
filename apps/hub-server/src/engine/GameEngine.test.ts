@@ -22,6 +22,7 @@ function makeEvents(): GameEngineEvents & { calls: Record<string, any[]> } {
     captureAbandoned: record('captureAbandoned'),
     tagInflicted: record('tagInflicted'),
     tagReceived: record('tagReceived'),
+    tagOccurred: record('tagOccurred'),
     respawnCompleted: record('respawnCompleted'),
     scanRejected: record('scanRejected'),
     sessionStarted: record('sessionStarted'),
@@ -426,5 +427,44 @@ describe('GameEngine — session lifecycle', () => {
     expect(cp?.capturingPlayerId).toBeNull();
     const alice = await store.players.get('p-a');
     expect(alice?.playerStatus).toBe('active');
+  });
+
+  it('endSession resets a tagged-out player back to active, so a fresh session does not start with stale badges', async () => {
+    const { engine, store } = await setup();
+    await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+    await engine.attemptTag('p-a', 'raw', 'token-bob-1234567890ab');
+    expect((await store.players.get('p-b'))?.playerStatus).toBe('tagged_out');
+
+    await engine.endSession(STATION_ID);
+
+    expect((await store.players.get('p-b'))?.playerStatus).toBe('active');
+    expect((await store.players.get('p-a'))?.playerStatus).toBe('active');
+  });
+});
+
+describe('GameEngine — public broadcast events', () => {
+  it('tagOccurred carries source/target player and team ids for the spectator ticker', async () => {
+    const { engine, events } = await setup();
+    await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+
+    await engine.attemptTag('p-a', 'raw', 'token-bob-1234567890ab');
+
+    expect(events.calls.tagOccurred).toHaveLength(1);
+    expect(events.calls.tagOccurred[0][0]).toMatchObject({
+      sourcePlayerId: 'p-a',
+      targetPlayerId: 'p-b',
+      sourceTeamId: TEAM_A,
+      targetTeamId: TEAM_B,
+    });
+  });
+
+  it('captureStarted carries the capturing playerId', async () => {
+    const { engine, events } = await setup();
+    await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+
+    await engine.attemptCapture('p-a', 'raw', CP_MAC);
+
+    expect(events.calls.captureStarted).toHaveLength(1);
+    expect(events.calls.captureStarted[0][0]).toMatchObject({ playerId: 'p-a' });
   });
 });

@@ -4,6 +4,7 @@ import QrScanner from 'qr-scanner';
 import QrScannerWorkerPath from 'qr-scanner/qr-scanner-worker.min.js?url';
 import type { Socket } from 'socket.io-client';
 import type { GameState } from '../useGame';
+import { formatRelativeTime, useNowTick } from '../relativeTime';
 import { ClaimBadgeScreen } from './ClaimBadgeScreen';
 import { playCaptureFeedback, playTagInflictedFeedback, playTaggedFeedback } from './feedback';
 import { downscalePhoto } from './photo';
@@ -16,6 +17,7 @@ const DEDUP_WINDOW_MS = 2000; // HUB-172
  * that's the point at which camera and geolocation permissions actually matter, so this
  * is where we ask for them instead of on first page load. */
 export function GameplayScreen({ socket, state }: { socket: Socket; state: GameState }) {
+  const now = useNowTick();
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerRef = useRef<QrScanner | null>(null);
   const lastScanRef = useRef<{ raw: string; atMs: number } | null>(null);
@@ -223,8 +225,10 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
         )}
 
         <div className="event-log">
-          {state.eventLog.map((line, i) => (
-            <div key={i}>{line}</div>
+          {state.eventLog.map((entry) => (
+            <div key={entry.id}>
+              <span className="event-log-time">{formatRelativeTime(entry.atMs, now)}</span> — {entry.text}
+            </div>
           ))}
         </div>
       </div>

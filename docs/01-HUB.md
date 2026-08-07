@@ -147,7 +147,8 @@ require a **secure context**. The Web App MUST therefore be served over HTTPS.
 > `TLS_MODE=provided`, and point `dnsmasq` at the Hub with
 > `address=/ctf.example.com/<HUB_IP>`. DNS-01 proves domain control via a TXT record and
 > never contacts the Hub. Cost: a domain with an API-capable DNS provider, and 90-day
-> manual renewal. Roughly 30 minutes of work.
+> manual renewal. Roughly 30 minutes of work. `ops/get-letsencrypt-cert.sh` automates the
+> Cloudflare-DNS-01 flavor of this (run it on any online machine, not the Hub).
 
 **HUB-022** The generated self-signed cert MUST include SANs for **both** the DNS name and
 the **IP address** (`IP:<HUB_IP>`), so `https://<gateway-ip>/` works with no DNS at all.
@@ -790,7 +791,7 @@ load-bearing.
 | `PRESENCE_GRACE_MS` | 2500 | 2500 |
 | `TAG_COOLDOWN_MS` | 10000 | 10000 |
 | `RESPAWN_IMMUNITY_MS` | 5000 | 5000 |
-| `HEARTBEAT_INTERVAL_MS` | 15000 | 15000 |
+| `HEARTBEAT_INTERVAL_MS` | 5000 | 5000 |
 | `NEUTRAL_HEX_COLOR` | `#FFFFFF` | `#FFFFFF` |
 | `UNCLAIMED_HEX_COLOR` | `#202020` | `#202020` |
 | `ADMIN_PIN` | `1234` | required |

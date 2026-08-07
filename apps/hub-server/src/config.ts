@@ -131,7 +131,7 @@ export async function loadConfig(): Promise<Config> {
     presenceGraceMs: envInt('PRESENCE_GRACE_MS', 2500),
     tagCooldownMs: envInt('TAG_COOLDOWN_MS', 10000),
     respawnImmunityMs: envInt('RESPAWN_IMMUNITY_MS', 5000),
-    heartbeatIntervalMs: envInt('HEARTBEAT_INTERVAL_MS', 15000),
+    heartbeatIntervalMs: envInt('HEARTBEAT_INTERVAL_MS', 5000),
     neutralHexColor: envStr('NEUTRAL_HEX_COLOR', '#FFFFFF'),
     unclaimedHexColor: envStr('UNCLAIMED_HEX_COLOR', '#202020'),
     adminPin: envStr('ADMIN_PIN', '1234'),

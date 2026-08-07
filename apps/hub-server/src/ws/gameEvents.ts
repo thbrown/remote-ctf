@@ -17,6 +17,7 @@ export function createSocketIoGameEvents(io: Server): GameEngineEvents {
     captureAbandoned: (e) => io.emit('capture:abandoned', e),
     tagInflicted: (playerId, e) => io.to(`player:${playerId}`).emit('tag:inflicted', e),
     tagReceived: (playerId, e) => io.to(`player:${playerId}`).emit('tag:received', e),
+    tagOccurred: (e) => io.to('spectators').emit('tag:occurred', e),
     respawnCompleted: (playerId, e) => io.to(`player:${playerId}`).emit('respawn:completed', e),
     scanRejected: (playerId: string, raw: string, reason: ScanRejectReason) =>
       io.to(`player:${playerId}`).emit('scan:rejected', { raw, reason }),

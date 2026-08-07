@@ -23,6 +23,7 @@ import type {
   RespawnCompletedEvent,
   ScanRejectReason,
   TagEvent,
+  TagOccurredEvent,
 } from '@foundry-ctf/shared';
 import type { GameStateStore } from '../store/GameStateStore.js';
 import type { Clock } from './Clock.js';
@@ -39,6 +40,8 @@ export interface GameEngineEvents {
   captureAbandoned(e: CaptureAbandonedEvent): void;
   tagInflicted(sourcePlayerId: string, e: TagEvent): void;
   tagReceived(targetPlayerId: string, e: TagEvent): void;
+  /** Public, spectator-room broadcast - see TagOccurredEvent's doc comment. */
+  tagOccurred(e: TagOccurredEvent): void;
   respawnCompleted(playerId: string, e: RespawnCompletedEvent): void;
   scanRejected(playerId: string, raw: string, reason: ScanRejectReason): void;
   sessionStarted(sessionId: string): void;
@@ -293,6 +296,14 @@ export class GameEngine {
 
     await this.store.sessions.update(sessionId, { endTimestamp: this.wallClockIso(), winningTeamId });
     await this.store.stations.update(stationId, { currentSessionId: null });
+
+    // Mirrors handleHubRestart's reset above: a tagged-out badge is meaningless once
+    // there's no session, and nothing else ever clears it back to active.
+    const players = await this.store.players.list({ stationId } as any);
+    for (const player of players as QrCtfPlayer[]) {
+      await this.store.players.update(player.playerId, { playerStatus: 'active' });
+    }
+
     this.events.sessionEnded(sessionId, winningTeamId);
   }
 
@@ -372,6 +383,7 @@ export class GameEngine {
     this.events.captureStarted({
       captureId: capture.captureId,
       controlPointId: cp.controlPointId,
+      playerId,
       durationMs: session.captureDurationMs,
       startedAtMs: this.clock.now(),
     });
@@ -555,6 +567,13 @@ export class GameEngine {
 
     this.events.tagInflicted(sourcePlayerId, { tagId: tag.tagId, otherPlayerId: target.playerId });
     this.events.tagReceived(target.playerId, { tagId: tag.tagId, otherPlayerId: sourcePlayerId });
+    this.events.tagOccurred({
+      tagId: tag.tagId,
+      sourcePlayerId,
+      targetPlayerId: target.playerId,
+      sourceTeamId: source.teamId as string,
+      targetTeamId: target.teamId as string,
+    });
 
     // HUB-107: capturer tagged mid-attempt aborts their capture.
     const victimCaptureId = this.captureIdByPlayerId.get(target.playerId);

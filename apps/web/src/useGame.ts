@@ -21,6 +21,12 @@ export interface ScanRejection {
   atMs: number;
 }
 
+export interface EventLogEntry {
+  id: number;
+  atMs: number;
+  text: string;
+}
+
 export interface GameState {
   status: ConnectionStatus;
   teams: QrCtfTeam[];
@@ -29,7 +35,7 @@ export interface GameState {
   ownPlayer: QrCtfPlayer | null;
   activeCapture: CaptureProgressState | null;
   lastRejection: ScanRejection | null;
-  eventLog: string[];
+  eventLog: EventLogEntry[];
   /** Set when session:hello's ack comes back ok:false (e.g. a bad admin PIN) - cleared at
    * the start of every fresh hello attempt. Admin/spectator only; players always succeed
    * (they get a fresh identity if their stored one doesn't match). */
@@ -73,6 +79,7 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     lastFeedbackEvent: null,
   }));
   const helloSentRef = useRef(false);
+  const eventLogIdRef = useRef(0);
 
   useEffect(() => {
     // Reset on every effect run (role/adminPin change, e.g. a retry with a corrected PIN)
@@ -80,8 +87,9 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     helloSentRef.current = false;
     setState((s) => (s.authError ? { ...s, authError: null } : s));
 
-    function pushLog(line: string) {
-      setState((s) => ({ ...s, eventLog: [line, ...s.eventLog].slice(0, 50) }));
+    function pushLog(text: string) {
+      const entry = { id: eventLogIdRef.current++, atMs: Date.now(), text };
+      setState((s) => ({ ...s, eventLog: [entry, ...s.eventLog].slice(0, 50) }));
     }
 
     function sendHello() {
@@ -177,6 +185,10 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     }
     function onSessionEnded() {
       pushLog('Session ended');
+      // The store patch for the ended session carries endTimestamp/winningTeamId, not a
+      // null - nothing else ever clears state.session back to null, which left Admin/
+      // Player screens stuck showing session-in-progress UI until a refresh.
+      setState((s) => ({ ...s, session: null }));
     }
     function onDisconnect() {
       setState((s) => ({ ...s, status: 'disconnected' }));
