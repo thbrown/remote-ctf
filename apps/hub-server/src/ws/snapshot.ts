@@ -6,6 +6,18 @@
 import type { StateSnapshot } from '@foundry-ctf/shared';
 import type { GameStateStore } from '../store/GameStateStore.js';
 
+/**
+ * The one definition of what a spectator may see of a game-state row. Both the snapshot and
+ * the live patch stream go through this: the two were redacting independently, so a field
+ * stripped from one still went out on the other.
+ */
+export function redactForSpectator<T extends object>(type: string, row: T): T {
+  if (type === 'qrCtfControlPoint' && 'capturingPlayerId' in row) {
+    return { ...row, capturingPlayerId: null };
+  }
+  return row;
+}
+
 export async function buildSnapshot(
   store: GameStateStore,
   stationId: string,
@@ -18,7 +30,7 @@ export async function buildSnapshot(
   const session = sessionId ? await store.sessions.get(sessionId) : null;
 
   const controlPoints = opts.spectator
-    ? controlPointsRaw.map((cp: any) => ({ ...cp, capturingPlayerId: null }))
+    ? controlPointsRaw.map((cp: any) => redactForSpectator('qrCtfControlPoint', cp))
     : controlPointsRaw;
 
   const ownPlayer = opts.forPlayerId ? ((await store.players.get(opts.forPlayerId)) ?? undefined) : undefined;

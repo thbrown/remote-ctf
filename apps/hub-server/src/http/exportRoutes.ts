@@ -21,7 +21,7 @@ import type { Config } from '../config.js';
 import type { GameStateStore } from '../store/GameStateStore.js';
 import type { SeriesPoint } from '../store/TimeSeriesStore.js';
 import { REPLAY_HTML } from './replayPage.js';
-import { buildCsvTables, CSV_TABLE_NAMES, renderCsv } from './csvExport.js';
+import { buildCsvTables, CSV_TABLE_NAMES, isCsvTableName, renderCsv } from './csvExport.js';
 
 export interface SessionExport {
   session: unknown;
@@ -210,15 +210,37 @@ export function toGeoJson(data: SessionExport): unknown {
 }
 
 export function registerExportRoutes(app: express.Express, store: GameStateStore, config: Config): void {
-  /** Same gate as the live map: if positions aren't public, neither is the track archive. */
-  function ensureAllowed(res: express.Response): boolean {
-    if (config.spectatorShowPositions) return true;
+  /**
+   * Same gate as the live map: if positions aren't public, neither is the track archive.
+   * Mounted as middleware over the whole prefix rather than checked per handler, so a route
+   * added later can't leak positions by forgetting the check.
+   */
+  app.use(['/export', '/replay'], (_req, res, next) => {
+    if (config.spectatorShowPositions) return next();
     res.status(403).type('text').send('Position export is disabled (SPECTATOR_SHOW_POSITIONS=false).');
-    return false;
+  });
+
+  /**
+   * Loads the session export or answers 404, so every handler below can just take the data.
+   * The 404 body follows the route's own content type — a client asking for CSV shouldn't
+   * have to parse JSON to learn the session is gone.
+   */
+  function withExport(
+    notFound: 'json' | 'text',
+    handler: (data: SessionExport, req: express.Request, res: express.Response) => void | Promise<void>,
+  ): express.RequestHandler {
+    return async (req, res) => {
+      const data = await buildSessionExport(store, req.params.sessionId);
+      if (!data) {
+        if (notFound === 'json') res.status(404).json({ error: 'session_not_found' });
+        else res.status(404).type('text').send('session_not_found');
+        return;
+      }
+      await handler(data, req, res);
+    };
   }
 
   app.get('/export', async (_req, res) => {
-    if (!ensureAllowed(res)) return;
     const sessions = (await store.sessions.list()) as any[];
     const rows = [...sessions].sort((a, b) => String(b.startTimestamp).localeCompare(String(a.startTimestamp)));
     res
@@ -248,19 +270,15 @@ a{color:#8ab4ff}table{border-collapse:collapse}td,th{padding:8px 14px;border-bot
 
   /** Human-facing CSV index: one link per table, with row counts so it's obvious which
    * tables actually have data before downloading fourteen files. */
-  app.get('/export/:sessionId/csv', async (req, res) => {
-    if (!ensureAllowed(res)) return;
-    const data = await buildSessionExport(store, req.params.sessionId);
-    if (!data) {
-      res.status(404).type('text').send('session_not_found');
-      return;
-    }
-    const tables = buildCsvTables(data);
-    const sid = encodeURIComponent(req.params.sessionId);
-    res
-      .status(200)
-      .type('html')
-      .send(
+  app.get(
+    '/export/:sessionId/csv',
+    withExport('text', (data, req, res) => {
+      const tables = buildCsvTables(data);
+      const sid = encodeURIComponent(req.params.sessionId);
+      res
+        .status(200)
+        .type('html')
+        .send(
         `<!doctype html><html><head><meta charset="utf-8"><title>CSV export</title>
 <style>body{font-family:-apple-system,Helvetica,Arial,sans-serif;background:#0b0d12;color:#f2f2f2;padding:24px;line-height:1.5}
 a{color:#8ab4ff}table{border-collapse:collapse;margin-top:16px}td,th{padding:7px 14px;border-bottom:1px solid #262a33;text-align:left}
@@ -281,75 +299,62 @@ with its columns, row count and URL.</p>
         ).join('')}</tbody></table>
 <p style="margin-top:24px"><a href="/export">&larr; All sessions</a></p></body></html>`,
       );
-  });
+    }),
+  );
 
-  app.get('/export/:sessionId.json', async (req, res) => {
-    if (!ensureAllowed(res)) return;
-    const data = await buildSessionExport(store, req.params.sessionId);
-    if (!data) {
-      res.status(404).json({ error: 'session_not_found' });
-      return;
-    }
-    res.status(200).json(data);
-  });
+  app.get(
+    '/export/:sessionId.json',
+    withExport('json', (data, _req, res) => {
+      res.status(200).json(data);
+    }),
+  );
 
-  app.get('/export/:sessionId.geojson', async (req, res) => {
-    if (!ensureAllowed(res)) return;
-    const data = await buildSessionExport(store, req.params.sessionId);
-    if (!data) {
-      res.status(404).json({ error: 'session_not_found' });
-      return;
-    }
-    res.status(200).type('application/geo+json').send(JSON.stringify(toGeoJson(data)));
-  });
+  app.get(
+    '/export/:sessionId.geojson',
+    withExport('json', (data, _req, res) => {
+      res.status(200).type('application/geo+json').send(JSON.stringify(toGeoJson(data)));
+    }),
+  );
 
   /**
    * Manifest for a programmatic client (the eventual Foundry upload job): one request tells
    * it which tables exist, their columns, row counts and URLs, so it can iterate without
    * hardcoding this route list.
    */
-  app.get('/export/:sessionId/tables.json', async (req, res) => {
-    if (!ensureAllowed(res)) return;
-    const data = await buildSessionExport(store, req.params.sessionId);
-    if (!data) {
-      res.status(404).json({ error: 'session_not_found' });
-      return;
-    }
-    const tables = buildCsvTables(data);
-    res.status(200).json({
-      sessionId: req.params.sessionId,
-      tables: CSV_TABLE_NAMES.map((name) => ({
-        name,
-        url: `/export/${encodeURIComponent(req.params.sessionId)}/${name}.csv`,
-        columns: tables[name].columns,
-        rowCount: tables[name].rows.length,
-      })),
-    });
-  });
+  app.get(
+    '/export/:sessionId/tables.json',
+    withExport('json', (data, req, res) => {
+      const tables = buildCsvTables(data);
+      res.status(200).json({
+        sessionId: req.params.sessionId,
+        tables: CSV_TABLE_NAMES.map((name) => ({
+          name,
+          url: `/export/${encodeURIComponent(req.params.sessionId)}/${name}.csv`,
+          columns: tables[name].columns,
+          rowCount: tables[name].rows.length,
+        })),
+      });
+    }),
+  );
 
-  app.get('/export/:sessionId/:table.csv', async (req, res) => {
-    if (!ensureAllowed(res)) return;
+  app.get('/export/:sessionId/:table.csv', (req, res, next) => {
     const table = req.params.table;
-    if (!(CSV_TABLE_NAMES as readonly string[]).includes(table)) {
+    if (!isCsvTableName(table)) {
       res.status(404).type('text').send(`Unknown table "${table}". Available: ${CSV_TABLE_NAMES.join(', ')}`);
       return;
     }
-    const data = await buildSessionExport(store, req.params.sessionId);
-    if (!data) {
-      res.status(404).type('text').send('session_not_found');
-      return;
-    }
-    res
-      .status(200)
-      .type('text/csv; charset=utf-8')
-      // Named by session so a directory of downloads stays unambiguous once there's more
-      // than one match in it.
-      .set('content-disposition', `attachment; filename="${table}_${req.params.sessionId}.csv"`)
-      .send(renderCsv(buildCsvTables(data)[table]));
+    withExport('text', (data, _req, res2) => {
+      res2
+        .status(200)
+        .type('text/csv; charset=utf-8')
+        // Named by session so a directory of downloads stays unambiguous once there's more
+        // than one match in it.
+        .set('content-disposition', `attachment; filename="${table}_${req.params.sessionId}.csv"`)
+        .send(renderCsv(buildCsvTables(data)[table]));
+    })(req, res, next);
   });
 
   app.get('/replay', (_req, res) => {
-    if (!ensureAllowed(res)) return;
     res.status(200).type('html').send(REPLAY_HTML);
   });
 }

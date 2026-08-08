@@ -315,17 +315,18 @@ export class GameEngine {
 
   /**
    * Provisions a player's QrCtfPlayerSession and its six series for `sessionId`, if it
-   * doesn't exist yet. Idempotent, and takes the store handle explicitly so it works both
-   * inside startSession's batch (`tx`) and on the lazy path outside one (`this.store`).
+   * doesn't exist yet, and returns the row either way so callers don't have to re-query for
+   * what this just resolved. Idempotent, and takes the store handle explicitly so it works
+   * both inside startSession's batch (`tx`) and on the lazy path outside one (`this.store`).
    *
    * The lazy path matters: players are created on first `session:hello` at any time
    * (WsGateway), so anyone joining after startSession used to have no playerSession at
    * all — every series append for them silently no-op'd and their stats read as zero for
    * the rest of the game.
    */
-  private async ensurePlayerSession(store: GameStateStore, player: QrCtfPlayer, sessionId: string): Promise<void> {
+  private async ensurePlayerSession(store: GameStateStore, player: QrCtfPlayer, sessionId: string): Promise<any> {
     const existing = await store.playerSessions.list({ sessionId, playerId: player.playerId } as any);
-    if (existing.length > 0) return;
+    if (existing.length > 0) return existing[0];
 
     const [locationLatSeriesId, locationLongSeriesId, isAliveSeriesId, tagsInflictedSeriesId, tagsReceivedSeriesId, capturesCompletedSeriesId] =
       await Promise.all([
@@ -336,7 +337,7 @@ export class GameEngine {
         store.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'tagsReceived', valueType: 'int' }),
         store.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'capturesCompleted', valueType: 'int' }),
       ]);
-    await store.playerSessions.create({
+    const created = await store.playerSessions.create({
       playerSessionId: randomUUID(),
       sessionId,
       playerId: player.playerId,
@@ -351,6 +352,7 @@ export class GameEngine {
     // Every alive/dead track needs a defined starting state, or a reader can't tell
     // "was active the whole time" from "never recorded anything".
     await this.appendSeries(store, isAliveSeriesId, true);
+    return created;
   }
 
   /** HUB-108 (session_ended) + HUB-133. */
@@ -418,7 +420,7 @@ export class GameEngine {
   }
 
   /** ensurePlayerSession against whatever session is currently running, if any. */
-  async ensureCurrentPlayerSession(playerId: string): Promise<void> {
+  private async ensureCurrentPlayerSession(playerId: string): Promise<void> {
     const player = await this.store.players.get(playerId);
     if (!player) return;
     const session = await this.getRunningSession(player);
@@ -442,11 +444,13 @@ export class GameEngine {
 
     const session = await this.getRunningSession(player);
     if (!session) return;
-    await this.ensurePlayerSession(this.store, player, session.sessionId);
-    const ps = (await this.store.playerSessions.list({ sessionId: session.sessionId, playerId } as any))[0] as any;
+    const ps = await this.ensurePlayerSession(this.store, player, session.sessionId);
     if (!ps) return;
-    await this.appendSeries(this.store, ps.locationLatSeriesId, lat);
-    await this.appendSeries(this.store, ps.locationLongSeriesId, long);
+    // Distinct series files, so there's nothing to serialise between them.
+    await Promise.all([
+      this.appendSeries(this.store, ps.locationLatSeriesId, lat),
+      this.appendSeries(this.store, ps.locationLongSeriesId, long),
+    ]);
   }
 
   private reject(playerId: string, raw: string, reason: ScanRejectReason): void {

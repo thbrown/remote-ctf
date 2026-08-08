@@ -163,20 +163,36 @@ ${MAP_VIEW_CSS}
       document.getElementById('timer').textContent = timerText();
     }
 
+    // render() runs on every state:patch - during a capture that's the 5 Hz progress feed
+    // plus per-second scores - but the map's inputs only change on the 3 s roster poll or
+    // an ownership flip. Rebuilding the whole SVG string and reparsing it through innerHTML
+    // at that rate is pure waste on the venue TV, so redraw only when something it draws
+    // actually moved. Width is in the key because the SVG is sized in pixels.
+    let lastMapKey = '';
     function renderMap() {
       const section = document.getElementById('map-section');
       section.hidden = !showPositions;
       if (!showPositions) return;
-      renderMapSvg(
-        document.getElementById('map-wrap'),
-        {
-          controlPoints,
-          respawnLocations,
-          players: players.map((p) => ({ ...p, atMs: positionChangedAtMs[p.playerId] })),
-          teamById,
-        },
-        { height: 420 },
-      );
+
+      const mapPlayers = players.map((p) => ({ ...p, atMs: positionChangedAtMs[p.playerId] }));
+      const wrap = document.getElementById('map-wrap');
+      const key = JSON.stringify([
+        wrap.clientWidth,
+        controlPoints.map((c) => [c.controlPointId, c.locationLat, c.locationLong, c.currentOwnerTeamId]),
+        respawnLocations.map((r) => [r.respawnLocationId, r.locationLat, r.locationLong]),
+        // The stale flag has to be in the key too: a player who stops reporting changes
+        // nothing else, but their dot still has to go hollow. Threshold mirrors the
+        // renderer's STALE_MS.
+        mapPlayers.map((p) => [
+          p.playerId, p.locationLat, p.locationLong, p.teamId, p.playerStatus,
+          p.atMs != null && Date.now() - p.atMs > 30000,
+        ]),
+        teams.map((t) => [t.teamId, t.hexColor]),
+      ]);
+      if (key === lastMapKey) return;
+      lastMapKey = key;
+
+      renderMapSvg(wrap, { controlPoints, respawnLocations, players: mapPlayers, teamById }, { height: 420 });
     }
     // The SVG is sized from the container's pixel width, so it has to be redrawn on resize
     // (and on the venue TV's orientation change) rather than scaling with CSS.

@@ -101,6 +101,9 @@ function scaleBarSvg(projection, w, h) {
  * Players carry an optional atMs so a stale fix can be drawn hollow - a frozen dot and a
  * genuinely stationary player look identical otherwise, and the difference matters a lot
  * when you're trying to work out whether someone's phone died.
+ *
+ * Returns the projection it drew with (null when there was nothing to draw) so callers can
+ * add their own layers - the replay page's trails - in the same coordinate space.
  */
 function renderMapSvg(el, entities, opts) {
   const w = el.clientWidth || 800;
@@ -122,7 +125,7 @@ function renderMapSvg(el, entities, opts) {
     el.innerHTML =
       '<div class="map-empty">No positions yet — an admin needs to set control point / respawn point ' +
       'coordinates, and players need a GPS fix.</div>';
-    return;
+    return null;
   }
 
   let svg = '<svg width="100%" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" role="img" aria-label="Live player map">';
@@ -174,6 +177,7 @@ function renderMapSvg(el, entities, opts) {
   svg += scaleBarSvg(projection, w, h);
   svg += '</svg>';
   el.innerHTML = svg;
+  return projection;
 }
 `;
 

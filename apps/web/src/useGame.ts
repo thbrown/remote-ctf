@@ -9,9 +9,9 @@ import { getSocket, loadPlayerIdentity, savePlayerIdentity, loadCachedOwnPlayer,
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
+/** Our own in-flight capture. There is never one for anybody else, so no playerId here. */
 export interface CaptureProgressState {
   captureId: string;
-  playerId: string;
   progress: number;
   isHumanDetected: boolean;
 }
@@ -176,17 +176,17 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     // progress ring is the exact bug this guards, and one stale server build shouldn't be
     // able to bring it back.
     function onCaptureStarted(e: { captureId: string; controlPointId: string; playerId: string; durationMs: number }) {
-      setState((s) => {
-        if (e.playerId !== s.ownPlayer?.playerId) return s;
-        return { ...s, activeCapture: { captureId: e.captureId, playerId: e.playerId, progress: 0, isHumanDetected: true } };
-      });
-      // Own-identity check lives in the reducer above (it needs `s.ownPlayer`), so gate the
-      // log on the same ref rather than logging someone else's capture start.
-      if (e.playerId === ownPlayerIdRef.current) pushLog('Capture started');
+      if (e.playerId !== ownPlayerIdRef.current) return;
+      setState((s) => ({ ...s, activeCapture: { captureId: e.captureId, progress: 0, isHumanDetected: true } }));
+      pushLog('Capture started');
     }
-    function onCaptureProgress(e: CaptureProgressState) {
+    function onCaptureProgress(e: { captureId: string; progress: number; isHumanDetected: boolean }) {
+      // activeCapture is only ever our own, so matching the captureId already establishes
+      // that this progress tick is ours.
       setState((s) =>
-        s.activeCapture?.captureId === e.captureId && e.playerId === s.ownPlayer?.playerId ? { ...s, activeCapture: e } : s,
+        s.activeCapture?.captureId === e.captureId
+          ? { ...s, activeCapture: { captureId: e.captureId, progress: e.progress, isHumanDetected: e.isHumanDetected } }
+          : s,
       );
     }
     // capture:completed and capture:abandoned are genuine broadcasts (control point ownership

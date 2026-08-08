@@ -33,7 +33,7 @@ import type { GameEngine } from '../engine/GameEngine.js';
 import type { Config } from '../config.js';
 import type { NodeDispatcher } from '../nodes/NodeDispatcher.js';
 import type { NodeRegistry } from '../nodes/NodeRegistry.js';
-import { buildSnapshot } from './snapshot.js';
+import { buildSnapshot, redactForSpectator } from './snapshot.js';
 
 export interface WsGatewayDeps {
   io: Server;
@@ -505,12 +505,10 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
     }
 
     if (SPECTATOR_VISIBLE_TYPES.has(e.type)) {
-      // Same redaction buildSnapshot applies for spectators (snapshot.ts) - the patch stream
-      // was leaking capturingPlayerId that the snapshot deliberately strips.
+      // Shares one redaction rule with buildSnapshot (snapshot.ts) - the patch stream used
+      // to leak capturingPlayerId that the snapshot deliberately strips.
       const spectatorPatch =
-        e.type === 'qrCtfControlPoint' && body && typeof body === 'object' && 'capturingPlayerId' in body
-          ? { ...patch, patch: { ...(body as object), capturingPlayerId: null } }
-          : patch;
+        body && typeof body === 'object' ? { ...patch, patch: redactForSpectator(e.type, body as object) } : patch;
       io.to('spectators').emit('state:patch', spectatorPatch);
     }
     io.except('spectators').emit('state:patch', patch);

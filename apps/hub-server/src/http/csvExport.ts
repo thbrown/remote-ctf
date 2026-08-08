@@ -43,7 +43,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
  * Every table a session produces, keyed by file name (without extension).
  * Order here is the order they're listed in the UI.
  */
-export function buildCsvTables(data: SessionExport): Record<string, CsvTable> {
+export function buildCsvTables(data: SessionExport): Record<CsvTableName, CsvTable> {
   const session = data.session as {
     sessionId: string;
     sessionName: string;
@@ -59,7 +59,10 @@ export function buildCsvTables(data: SessionExport): Record<string, CsvTable> {
   const teamNameById = new Map(data.teams.map((t) => [t.teamId, t.teamName]));
   const cpNameById = new Map(data.controlPoints.map((c) => [c.controlPointId, c.controlPointName]));
 
-  const tables: Record<string, CsvTable> = {};
+  // Partial while it fills, so a mistyped table name is a compile error rather than a file
+  // that quietly never appears in the manifest. That every declared name is actually
+  // assigned is covered by the coverage test.
+  const tables: Partial<Record<CsvTableName, CsvTable>> = {};
 
   tables.sessions = {
     columns: [
@@ -179,7 +182,7 @@ export function buildCsvTables(data: SessionExport): Record<string, CsvTable> {
     rows: (data.respawns as any[]).map((r) => [sid, r.respawnId, r.playerId, r.respawnLocationId, r.respawnTimestamp]),
   };
 
-  return tables;
+  return tables as Record<CsvTableName, CsvTable>;
 }
 
 export const CSV_TABLE_NAMES = [
@@ -198,3 +201,10 @@ export const CSV_TABLE_NAMES = [
   'captures',
   'respawns',
 ] as const;
+
+export type CsvTableName = (typeof CSV_TABLE_NAMES)[number];
+
+/** Narrows a path parameter to a real table, so callers can index buildCsvTables safely. */
+export function isCsvTableName(name: string): name is CsvTableName {
+  return (CSV_TABLE_NAMES as readonly string[]).includes(name);
+}

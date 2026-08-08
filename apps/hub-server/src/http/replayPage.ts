@@ -109,7 +109,7 @@ ${MAP_VIEW_CSS}
 
     function render() {
       const players = playersAt(cursorMs);
-      renderMapSvg(
+      const projection = renderMapSvg(
         document.getElementById('map-wrap'),
         {
           controlPoints: controlPointsAt(cursorMs),
@@ -121,7 +121,7 @@ ${MAP_VIEW_CSS}
         // be older than the staleness threshold and the whole map would render as stale.
         { height: 460, nowMs: cursorMs }
       );
-      if (document.getElementById('trails').checked) drawTrails();
+      if (projection && document.getElementById('trails').checked) drawTrails(projection);
       document.getElementById('clock').textContent = fmtClock(cursorMs - startMs);
       document.getElementById('scrub').value = String(
         endMs > startMs ? ((cursorMs - startMs) / (endMs - startMs)) * 1000 : 0
@@ -129,8 +129,9 @@ ${MAP_VIEW_CSS}
     }
 
     /** Path travelled so far, drawn under the current-position dots. Injected into the SVG
-     * the shared renderer produced rather than duplicating its projection logic. */
-    function drawTrails() {
+     * the shared renderer produced, using the projection it hands back, so trails can't
+     * drift off the marks. */
+    function drawTrails(projection) {
       const svg = document.querySelector('#map-wrap svg');
       if (!svg) return;
       const ns = 'http://www.w3.org/2000/svg';
@@ -138,8 +139,7 @@ ${MAP_VIEW_CSS}
         const upTo = p.track.filter((s) => s.t <= cursorMs);
         if (upTo.length < 2) continue;
         const team = teamById(p.teamId);
-        const pts = upTo.map((s) => projectViaRenderer(s));
-        if (pts.some((q) => !q)) continue;
+        const pts = upTo.map((s) => projection.project({ lat: s.lat, long: s.long }));
         const path = document.createElementNS(ns, 'polyline');
         path.setAttribute('points', pts.map((q) => q.x.toFixed(1) + ',' + q.y.toFixed(1)).join(' '));
         path.setAttribute('fill', 'none');
@@ -148,28 +148,6 @@ ${MAP_VIEW_CSS}
         path.setAttribute('stroke-opacity', '0.35');
         svg.insertBefore(path, svg.firstChild);
       }
-    }
-
-    // renderMapSvg builds its projection internally and doesn't hand it back, so trails
-    // rebuild an identical one from the identical input set. Keep this in step with the
-    // entity list passed to renderMapSvg below or trails will drift off the marks.
-    let currentProjection = null;
-    function rebuildProjection() {
-      const w = document.getElementById('map-wrap').clientWidth || 800;
-      const h = 460;
-      const all = []
-        .concat((data.controlPoints || []).filter((c) => typeof c.locationLat === 'number').map((c) => ({ lat: c.locationLat, long: c.locationLong })))
-        .concat((data.respawnLocations || []).map((r) => ({ lat: r.locationLat, long: r.locationLong })))
-        .concat(playersAt(cursorMs).map((p) => ({ lat: p.locationLat, long: p.locationLong })));
-      currentProjection = makeProjection(all, w, h, 28);
-    }
-    function projectViaRenderer(s) {
-      return currentProjection ? currentProjection.project({ lat: s.lat, long: s.long }) : null;
-    }
-
-    function renderAll() {
-      rebuildProjection();
-      render();
     }
 
     function renderLegend() {
@@ -188,7 +166,7 @@ ${MAP_VIEW_CSS}
       const dt = lastFrameMs ? nowPerf - lastFrameMs : 16;
       lastFrameMs = nowPerf;
       cursorMs = Math.min(endMs, cursorMs + dt * SPEED);
-      renderAll();
+      render();
       if (cursorMs >= endMs) {
         playing = false;
         document.getElementById('play').textContent = '▶ Play';
@@ -207,10 +185,10 @@ ${MAP_VIEW_CSS}
     });
     document.getElementById('scrub').addEventListener('input', (e) => {
       cursorMs = startMs + ((endMs - startMs) * Number(e.target.value)) / 1000;
-      renderAll();
+      render();
     });
-    document.getElementById('trails').addEventListener('change', renderAll);
-    window.addEventListener('resize', renderAll);
+    document.getElementById('trails').addEventListener('change', render);
+    window.addEventListener('resize', render);
 
     async function load() {
       if (!sessionId) {
@@ -239,7 +217,7 @@ ${MAP_VIEW_CSS}
         data.session.sessionName + ' — ' + new Date(startMs).toLocaleString() + ' · ' + fmtClock(endMs - startMs) + ' of tracked play';
       document.getElementById('controls').hidden = false;
       renderLegend();
-      renderAll();
+      render();
     }
 
     load();
