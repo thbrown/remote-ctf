@@ -308,16 +308,33 @@ MUST display *"Applies to the next session."*
 
 ```ts
 export const SEED_TEAMS = [
-  { teamId: 'e9b2b516-6c79-4e30-8177-32de66a37f29', teamName: 'Blue Bandits',  hexColor: '#3A48EA' },
-  { teamId: '38c7ae2e-259d-42df-a13d-496dd7375dc8', teamName: 'Red Raiders',   hexColor: '#EE2D2D' },
-  { teamId: 'cfa98610-1b23-4979-a733-18ba106a6f41', teamName: 'Green Goblins', hexColor: '#00E301' },
+  { teamId: 'e9b2b516-6c79-4e30-8177-32de66a37f29', teamName: 'Blue Bandits',  hexColor: '#0014FF' },
+  { teamId: '38c7ae2e-259d-42df-a13d-496dd7375dc8', teamName: 'Red Raiders',   hexColor: '#FF0000' },
+  { teamId: 'cfa98610-1b23-4979-a733-18ba106a6f41', teamName: 'Green Goblins', hexColor: '#00FF01' },
   { teamId: '718a369c-cfce-4814-9bf5-e934125d90a8', teamName: 'Yellow Yaks',   hexColor: '#FFFF00' },
-  { teamId: '4f0cb7d5-5b11-4175-8a9c-4853f5fe2d2b', teamName: 'Cyan Cyclones', hexColor: '#00EAEA' },
-  { teamId: '860d1e6b-57c1-4e7b-b234-1744c071e962', teamName: 'Pink Panthers', hexColor: '#EA76DD' },
-  { teamId: '1949c46d-8759-4b66-9976-04ae17d9ee34', teamName: 'Grey Ghosts',   hexColor: '#7D7D7D' },
-  { teamId: 'a2e4f279-ad40-4424-9ab9-f7be0247bbbf', teamName: 'Orange Orcs',   hexColor: '#F07D19' },
+  { teamId: '4f0cb7d5-5b11-4175-8a9c-4853f5fe2d2b', teamName: 'Cyan Cyclones', hexColor: '#00FFFF' },
+  { teamId: 'a2e4f279-ad40-4424-9ab9-f7be0247bbbf', teamName: 'Orange Orcs',   hexColor: '#FF5000' },
 ] as const;
 ```
+
+> **Amended 2026-08-08 by the project owner, after testing against real LED hardware.**
+> Originally eight teams with screen-picked colors. Two problems showed up on real hardware:
+> the colors were washed out, and eight hues aren't distinguishable on a cheap RGB LED at
+> playing distance.
+>
+> On an emissive LED the *minimum* RGB channel is not part of the hue — it's white light on
+> top of it. Measured against the original list: Pink Panthers `#EA76DD` was 50% saturated
+> (46% white) and Grey Ghosts `#7D7D7D` was 0% saturated — literally white at half brightness,
+> and therefore indistinguishable from the neutral/unowned `#FFFFFF`. Those two teams were
+> **retired**; the remaining six were rescaled to 100% saturation, preserving hue.
+>
+> Orange is the exception to hue-preservation: green contributes ~3.4x more perceived
+> brightness than red at equal drive (Rec. 709 luma), so a hue-exact `#FF7700` still reads
+> yellow on an LED. Its green channel is cut to `#FF5000`.
+>
+> `SEED_TEAMS` is now reconciled on every boot (`reconcileSeedTeams` in `index.ts`), not just
+> created-if-absent — otherwise an already-seeded data directory would keep the old list
+> forever. Retired teams are deleted and any player still on one is moved back to no-team.
 
 **HUB-045** Teams are **fixed**. There is no team CRUD in the Admin UI. The admin MAY
 choose which subset is *active* for a session; players pick only from active teams.
@@ -546,6 +563,15 @@ set `controlPoint.capturingPlayerId`, start a **monotonic** timer of
 
 **HUB-103** Tick `controlPoint.captureProgress` from 0 → 1 and broadcast `capture:progress`
 at **5 Hz**.
+
+> **Implementation note (2026-08-08), deliberate narrowing of "broadcast".** `capture:started`
+> and `capture:progress` are delivered **only to the capturing player's room**, not to every
+> client. Read literally, "broadcast" put a progress ring on every player's phone whenever
+> anyone anywhere started a capture — which is what HUB-173 already scopes to the capturing
+> player's own Camera View. Spectators get a PII-light `capture:occurred` twin instead (same
+> split as `tag:inflicted`/`tag:received` vs `tag:occurred`) so the scoreboard ticker still
+> announces captures. `controlPoint.captureProgress` itself is still written to the store on
+> every tick, so it remains available to anything that legitimately needs it.
 
 **HUB-104 — Presence grace.** The Hub MUST abandon on presence loss only after
 `isHumanDetected === false` **continuously for `station.presenceGraceMs`** (default

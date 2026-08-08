@@ -37,6 +37,14 @@ export interface Config {
   unclaimedHexColor: string;
   adminPin: string;
   stationId: string;
+  /** Whether the public scoreboard's live map shows player positions.
+   *
+   * Deliberate exception to HUB-094's "no player PII to spectators" rule, enabled by
+   * request. Worth being clear-eyed about: /scoreboard is unauthenticated plain HTTP on the
+   * game Wi-Fi, so anyone on the AP - including the players themselves - can open it and see
+   * every opponent's live position. That's a competitive-fairness problem more than a
+   * privacy one. Set SPECTATOR_SHOW_POSITIONS=false for a serious game. */
+  spectatorShowPositions: boolean;
 }
 
 function envInt(name: string, fallback: number): number {
@@ -44,6 +52,12 @@ function envInt(name: string, fallback: number): number {
   if (raw === undefined || raw === '') return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function envBool(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  return !/^(0|false|no|off)$/i.test(raw);
 }
 
 function envStr(name: string, fallback: string): string {
@@ -136,5 +150,6 @@ export async function loadConfig(): Promise<Config> {
     unclaimedHexColor: envStr('UNCLAIMED_HEX_COLOR', '#202020'),
     adminPin: envStr('ADMIN_PIN', '1234'),
     stationId: await resolveStationId(dataDir),
+    spectatorShowPositions: envBool('SPECTATOR_SHOW_POSITIONS', true),
   };
 }

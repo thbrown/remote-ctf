@@ -4,10 +4,17 @@ import QrScanner from 'qr-scanner';
 import QrScannerWorkerPath from 'qr-scanner/qr-scanner-worker.min.js?url';
 import type { Socket } from 'socket.io-client';
 import type { GameState } from '../useGame';
-import { formatRelativeTime, useNowTick } from '../relativeTime';
+import { formatCountdown, formatRelativeTime, useNowTick } from '../relativeTime';
 import { ClaimBadgeScreen } from './ClaimBadgeScreen';
 import { playCaptureFeedback, playTagInflictedFeedback, playTaggedFeedback } from './feedback';
 import { downscalePhoto } from './photo';
+import {
+  describeGeoError,
+  formatGeoStatus,
+  LOCATION_THROTTLE_MS,
+  WATCH_GEO_OPTIONS,
+  type GeoStatus,
+} from '../geolocation';
 
 QrScanner.WORKER_PATH = QrScannerWorkerPath;
 
@@ -28,6 +35,10 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [rescanningBadge, setRescanningBadge] = useState(false);
+  const [geoStatus, setGeoStatus] = useState<GeoStatus>({ kind: 'searching' });
+  /** Accuracy of the last fix we actually emitted, so the throttle can let a materially
+   * better one through early. Infinity until the first send. */
+  const lastSentAccuracyRef = useRef(Infinity);
 
   // Paused while rescanningBadge is open (ClaimBadgeScreen needs the camera itself, and
   // two QrScanner instances can't share one device at once) and restarted once it closes.
@@ -65,20 +76,39 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
     else if (e.kind === 'tagReceived') playTaggedFeedback();
   }, [state.lastFeedbackEvent]);
 
-  // HUB-175: GPS optional, throttled to >=3s, never gates any outcome.
+  // HUB-175: GPS optional, throttled to >=3s, never gates any outcome. See geolocation.ts
+  // for why enableHighAccuracy and a long timeout are load-bearing on an offline AP.
   useEffect(() => {
-    if (!('geolocation' in navigator)) return;
+    if (!('geolocation' in navigator)) {
+      setGeoStatus({ kind: 'unsupported' });
+      return;
+    }
+    setGeoStatus({ kind: 'searching' });
+    let lastSentAtMs = 0;
     const id = navigator.geolocation.watchPosition(
       (pos) => {
+        const nowMs = Date.now();
+        const accuracyM = pos.coords.accuracy;
+        setGeoStatus({ kind: 'ok', accuracyM, atMs: nowMs });
+        // Throttle, but never drop a fix that is materially more precise than the last one
+        // we sent - the first good lock after a cold start is exactly the sample worth having.
+        const muchBetter = accuracyM < lastSentAccuracyRef.current / 2;
+        if (!muchBetter && nowMs - lastSentAtMs < LOCATION_THROTTLE_MS) return;
+        lastSentAtMs = nowMs;
+        lastSentAccuracyRef.current = accuracyM;
         socket.emit('location', {
           lat: pos.coords.latitude,
           long: pos.coords.longitude,
-          accuracyM: pos.coords.accuracy,
-          clientTs: Date.now(),
+          accuracyM,
+          clientTs: nowMs,
         });
       },
-      () => {},
-      { maximumAge: 3000, timeout: 5000 },
+      (err) => {
+        // Previously swallowed entirely, which is why a broken GPS looked identical to a
+        // working one that simply had nothing to say.
+        setGeoStatus({ kind: 'error', message: describeGeoError(err) });
+      },
+      WATCH_GEO_OPTIONS,
     );
     return () => navigator.geolocation.clearWatch(id);
   }, [socket]);
@@ -159,6 +189,11 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
         {taggedOut && (
           <div className="tagged-out-overlay">
             <div>TAGGED OUT</div>
+            {/* Only name the tagger if the last feedback event was actually the tag that put
+                us here - a stale name from an earlier round would be worse than none. */}
+            {state.lastFeedbackEvent?.kind === 'tagReceived' && state.lastFeedbackEvent.otherPlayerName && (
+              <div className="tagged-out-by">by {state.lastFeedbackEvent.otherPlayerName}</div>
+            )}
             <div>Return to your respawn point</div>
           </div>
         )}
@@ -175,6 +210,12 @@ export function GameplayScreen({ socket, state }: { socket: Socket; state: GameS
           <span className="swatch" style={{ background: team?.hexColor }} />
           <strong>{ownPlayer?.playerName}</strong>
           <span className={`badge badge-${ownPlayer?.playerStatus}`}>{ownPlayer?.playerStatus}</span>
+          {state.session?.gameDurationMs != null && (
+            <span className="game-clock">{formatCountdown(state.session.startTimestamp, state.session.gameDurationMs, now)}</span>
+          )}
+          {/* Purely informational (HUB-175 forbids GPS gating any outcome), but without it
+              there's no way to tell a denied permission from a cold fix from a broken cert. */}
+          <span className={`badge gps-${geoStatus.kind}`}>{formatGeoStatus(geoStatus)}</span>
           <button onClick={openEditProfile}>Edit</button>
         </div>
 

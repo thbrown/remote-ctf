@@ -214,16 +214,24 @@ if they are not separable, so the Hub owner can restrict the active team palette
 
 ### Team color reference
 
+> **Changed 2026-08-08 (Hub side) — informational for firmware, no firmware action required.**
+> The Hub is the sole authority on these values and pushes them via `/set-color`; firmware
+> never hardcodes them, so this table is a reference, not a contract. Two teams were retired
+> and the rest re-saturated after the originals read washed out on real LEDs — the minimum RGB
+> channel is emitted as white light, so a screen-picked tint loses its hue. See doc01 §4.4.
+>
+> Previous values, for anyone reconciling old logs: Blue `#3A48EA`, Red `#EE2D2D`, Green
+> `#00E301`, Cyan `#00EAEA`, Orange `#F07D19`, plus retired Pink Panthers `#EA76DD` and Grey
+> Ghosts `#7D7D7D`.
+
 | Team | Hex |
 |---|---|
-| Blue Bandits | `#3A48EA` |
-| Red Raiders | `#EE2D2D` |
-| Green Goblins | `#00E301` |
+| Blue Bandits | `#0014FF` |
+| Red Raiders | `#FF0000` |
+| Green Goblins | `#00FF01` |
 | Yellow Yaks | `#FFFF00` |
-| Cyan Cyclones | `#00EAEA` |
-| Pink Panthers | `#EA76DD` |
-| Grey Ghosts | `#7D7D7D` |
-| Orange Orcs | `#F07D19` |
+| Cyan Cyclones | `#00FFFF` |
+| Orange Orcs | `#FF5000` |
 | *neutral (unowned)* | `#FFFFFF` |
 | *unclaimed hardware* | `#202020` |
 

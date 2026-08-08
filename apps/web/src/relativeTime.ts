@@ -22,3 +22,14 @@ export function formatRelativeTime(atMs: number, nowMs: number = Date.now()): st
   const deltaH = Math.round(deltaM / 60);
   return `${deltaH}h ago`;
 }
+
+/** "mm:ss" countdown for the optional game clock — clamped at "0:00", never negative
+ * (the Hub auto-ends the session around the same moment, but a client tick can land a
+ * beat before that patch arrives). */
+export function formatCountdown(startTimestamp: string, gameDurationMs: number, nowMs: number = Date.now()): string {
+  const remainingMs = Math.max(0, Date.parse(startTimestamp) + gameDurationMs - nowMs);
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}

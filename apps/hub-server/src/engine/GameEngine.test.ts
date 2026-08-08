@@ -468,3 +468,135 @@ describe('GameEngine — public broadcast events', () => {
     expect(events.calls.captureStarted[0][0]).toMatchObject({ playerId: 'p-a' });
   });
 });
+
+/** These series were all provisioned at session start but never written to (or, for
+ * isAlive, only ever written on one edge), so the recorded history was unreconstructible.
+ * See the timeseries audit in the plan for the full before/after table. */
+describe('GameEngine — time series recording', () => {
+  async function seriesFor(store: any, sessionId: string, playerId: string) {
+    return (await store.playerSessions.list({ sessionId, playerId }))[0] as any;
+  }
+
+  it('records a position on both location series and the player row', async () => {
+    const { engine, store } = await setup();
+    const session = await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+
+    await engine.recordPlayerLocation('p-a', 51.5, -0.12, 9);
+
+    const player = await store.players.get('p-a');
+    expect(player?.locationLat).toBeCloseTo(51.5);
+    expect((player as any)?.locationAccuracyM).toBe(9);
+
+    const ps = await seriesFor(store, session.sessionId, 'p-a');
+    expect((await store.series.latest(ps.locationLatSeriesId))?.v).toBeCloseTo(51.5);
+    expect((await store.series.latest(ps.locationLongSeriesId))?.v).toBeCloseTo(-0.12);
+  });
+
+  it('does not record a location series point when no session is running', async () => {
+    const { engine, store } = await setup();
+    await engine.recordPlayerLocation('p-a', 1, 2, 5);
+    expect(await store.playerSessions.list()).toHaveLength(0);
+    expect((await store.players.get('p-a'))?.locationLat).toBe(1); // row still updated
+  });
+
+  it('isAlive records both edges: true at session start, false on tag-out, true on respawn', async () => {
+    const { engine, store } = await setup();
+    const session = await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+    await store.respawnLocations.create({
+      respawnLocationId: 'rp1',
+      stationId: STATION_ID,
+      locationLat: 0,
+      locationLong: 0,
+      allowedTeamIds: [],
+    } as any);
+
+    const ps = await seriesFor(store, session.sessionId, 'p-b');
+    expect((await store.series.latest(ps.isAliveSeriesId))?.v).toBe(true);
+
+    await engine.attemptTag('p-a', 'raw', 'token-bob-1234567890ab');
+    expect((await store.series.latest(ps.isAliveSeriesId))?.v).toBe(false);
+
+    await engine.attemptRespawn('p-b', 'raw', 'rp1');
+    expect((await store.series.latest(ps.isAliveSeriesId))?.v).toBe(true);
+
+    const points = await store.series.range(ps.isAliveSeriesId, 0, Date.now() + 1000);
+    expect(points.map((p: any) => p.v)).toEqual([true, false, true]);
+  });
+
+  it('tickScoring appends to each team score series', async () => {
+    const { engine, store } = await setup();
+    const session = await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+    await store.controlPoints.update('cp1', { currentOwnerTeamId: TEAM_A });
+
+    await engine.tickScoring(STATION_ID);
+
+    const teamSessions = await store.teamSessions.list({ sessionId: session.sessionId } as any);
+    const a = teamSessions.find((t: any) => t.teamId === TEAM_A) as any;
+    expect((await store.series.latest(a.scoreSeriesId))?.v).toBe(1);
+  });
+
+  it('completeCapture appends the new owner to the control point owner-history series', async () => {
+    const { engine, store, clock } = await setup();
+    const session = await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+    await engine.attemptCapture('p-a', 'raw', CP_MAC);
+    clock.advance(10000);
+    await engine.tickCaptures(STATION_ID);
+
+    const cpSession = (await store.controlPointSessions.list({ sessionId: session.sessionId, controlPointId: 'cp1' } as any))[0] as any;
+    expect((await store.series.latest(cpSession.ownerHistorySeriesId))?.v).toBe(TEAM_A);
+  });
+
+  it('presence history records transitions only, not every rewrite', async () => {
+    const { engine, store } = await setup();
+    const session = await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+
+    // Three writes, one actual transition each way, plus repeats that must be ignored.
+    await store.controlPoints.update('cp1', { isHumanDetected: false });
+    await store.controlPoints.update('cp1', { isHumanDetected: false });
+    await store.controlPoints.update('cp1', { isHumanDetected: true });
+    await store.controlPoints.update('cp1', { isHumanDetected: true });
+    await new Promise((r) => setTimeout(r, 50)); // appends are fire-and-forget
+
+    const cpSession = (await store.controlPointSessions.list({ sessionId: session.sessionId, controlPointId: 'cp1' } as any))[0] as any;
+    const points = await store.series.range(cpSession.isHumanDetectedHistorySeriesId, 0, Date.now() + 1000);
+    expect(points.map((p: any) => p.v)).toEqual([false, true]);
+  });
+
+  it('a mid-session joiner gets a playerSession provisioned on their first scan', async () => {
+    const { engine, store } = await setup();
+    const session = await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+
+    await store.players.create({
+      playerId: 'p-late',
+      playerName: 'Carol',
+      stationId: STATION_ID,
+      sessionId: null,
+      playerSessionId: null,
+      teamId: TEAM_A,
+      qrCodeToken: 'token-carol-123456789',
+      playerStatus: 'active',
+      profilePicture: null,
+      locationLat: null,
+      locationLong: null,
+      playerSecret: 'secret-c',
+    } as any);
+    expect(await seriesFor(store, session.sessionId, 'p-late')).toBeUndefined();
+
+    await engine.handleScan('p-late', `qrctf:1:cp:${CP_MAC}`);
+
+    expect(await seriesFor(store, session.sessionId, 'p-late')).toBeDefined();
+  });
+
+  it('a backwards wall-clock step does not throw out of scoring (clamps instead)', async () => {
+    const { engine, store } = await setup();
+    const session = await engine.startSession(STATION_ID, 'Round 1', [TEAM_A, TEAM_B]);
+    const teamSessions = await store.teamSessions.list({ sessionId: session.sessionId } as any);
+    const a = teamSessions.find((t: any) => t.teamId === TEAM_A) as any;
+
+    // Simulate a future-stamped point already on the series (i.e. the clock has since
+    // stepped backwards); a raw append of "now" would be rejected as out-of-order.
+    await store.series.append(a.scoreSeriesId, { t: Date.now() + 60_000, v: 0.5 });
+
+    await expect(engine.tickScoring(STATION_ID)).resolves.not.toThrow();
+  });
+});

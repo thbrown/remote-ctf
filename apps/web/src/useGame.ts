@@ -11,8 +11,18 @@ export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
 export interface CaptureProgressState {
   captureId: string;
+  playerId: string;
   progress: number;
   isHumanDetected: boolean;
+}
+
+/** Mirrors TagEvent from @foundry-ctf/shared, with the added fields optional so a client
+ * running against an older Hub degrades to "another player" rather than "undefined". */
+interface TagEventPayload {
+  tagId: string;
+  otherPlayerId: string;
+  otherPlayerName?: string;
+  otherTeamId?: string | null;
 }
 
 export interface ScanRejection {
@@ -46,7 +56,12 @@ export interface GameState {
    * out of eventLog's string-based approach since that's meant for display text, and these
    * player-room-targeted events (never broadcast to everyone) are specifically the ones
    * that should trigger personal feedback, unlike e.g. the broadcast capture:completed. */
-  lastFeedbackEvent: { kind: 'captureCompleted' | 'tagInflicted' | 'tagReceived'; atMs: number } | null;
+  lastFeedbackEvent: {
+    kind: 'captureCompleted' | 'tagInflicted' | 'tagReceived';
+    atMs: number;
+    /** Who the tag was with, for the on-screen banner. Null for captureCompleted. */
+    otherPlayerName?: string | null;
+  } | null;
 }
 
 function applyPatch<T extends Record<string, any>>(list: T[], idKey: string, id: string, patch: unknown): T[] {
@@ -80,6 +95,12 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
   }));
   const helloSentRef = useRef(false);
   const eventLogIdRef = useRef(0);
+  /** Mirror of state.ownPlayer?.playerId, readable from event handlers that need our identity
+   * outside a setState reducer (e.g. deciding whether a capture event is ours before logging). */
+  const ownPlayerIdRef = useRef<string | null>(loadPlayerIdentity()?.playerId ?? null);
+  /** Mirror of state.teams, for handlers that need to resolve a teamId to a name without
+   * reaching into a setState reducer. */
+  const teamsRef = useRef<QrCtfTeam[]>([]);
 
   useEffect(() => {
     // Reset on every effect run (role/adminPin change, e.g. a retry with a corrected PIN)
@@ -120,6 +141,8 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     // tests for the same race, documented there in detail).
     function onSnapshot(snap: { teams: QrCtfTeam[]; controlPoints: QrCtfControlPoint[]; session: QrCtfSession | null; ownPlayer?: QrCtfPlayer }) {
       if (role === 'player') saveCachedOwnPlayer(snap.ownPlayer ?? null);
+      ownPlayerIdRef.current = snap.ownPlayer?.playerId ?? null;
+      teamsRef.current = snap.teams;
       setState((s) => ({
         ...s,
         teams: snap.teams,
@@ -132,7 +155,11 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
 
     function onPatch({ type, id, patch }: { type: string; id: string; patch: unknown }) {
       setState((s) => {
-        if (type === 'qrCtfTeam') return { ...s, teams: applyPatch(s.teams, 'teamId', id, patch) };
+        if (type === 'qrCtfTeam') {
+          const teams = applyPatch(s.teams, 'teamId', id, patch);
+          teamsRef.current = teams;
+          return { ...s, teams };
+        }
         if (type === 'qrCtfControlPoint') return { ...s, controlPoints: applyPatch(s.controlPoints, 'controlPointId', id, patch) };
         if (type === 'qrCtfSession') return { ...s, session: patch === null ? null : { ...(s.session ?? ({} as QrCtfSession)), ...(patch as object) } };
         if (type === 'qrCtfPlayer' && s.ownPlayer?.playerId === id) {
@@ -144,15 +171,29 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
       });
     }
 
-    function onCaptureStarted(e: { captureId: string; controlPointId: string; durationMs: number }) {
-      setState((s) => ({ ...s, activeCapture: { captureId: e.captureId, progress: 0, isHumanDetected: true } }));
-      pushLog('Capture started');
+    // The server already scopes capture:started/capture:progress to the capturing player's
+    // room, but we self-filter on playerId anyway: a bystander rendering someone else's
+    // progress ring is the exact bug this guards, and one stale server build shouldn't be
+    // able to bring it back.
+    function onCaptureStarted(e: { captureId: string; controlPointId: string; playerId: string; durationMs: number }) {
+      setState((s) => {
+        if (e.playerId !== s.ownPlayer?.playerId) return s;
+        return { ...s, activeCapture: { captureId: e.captureId, playerId: e.playerId, progress: 0, isHumanDetected: true } };
+      });
+      // Own-identity check lives in the reducer above (it needs `s.ownPlayer`), so gate the
+      // log on the same ref rather than logging someone else's capture start.
+      if (e.playerId === ownPlayerIdRef.current) pushLog('Capture started');
     }
     function onCaptureProgress(e: CaptureProgressState) {
-      setState((s) => (s.activeCapture?.captureId === e.captureId ? { ...s, activeCapture: e } : s));
+      setState((s) =>
+        s.activeCapture?.captureId === e.captureId && e.playerId === s.ownPlayer?.playerId ? { ...s, activeCapture: e } : s,
+      );
     }
-    function onCaptureCompleted() {
-      setState((s) => ({ ...s, activeCapture: null }));
+    // capture:completed and capture:abandoned are genuine broadcasts (control point ownership
+    // is public), so they must only clear OUR ring - otherwise one player finishing a capture
+    // wipes another player's in-progress ring.
+    function onCaptureCompleted(e: { captureId: string }) {
+      setState((s) => (s.activeCapture?.captureId === e.captureId ? { ...s, activeCapture: null } : s));
       pushLog('Capture completed!');
     }
     // Player-room-targeted (unlike capture:completed's broadcast to everyone) - this is
@@ -161,21 +202,34 @@ export function useGame(role: 'player' | 'admin' | 'spectator', adminPin?: strin
     function onCaptureCompletedOwn() {
       setState((s) => ({ ...s, lastFeedbackEvent: { kind: 'captureCompleted', atMs: Date.now() } }));
     }
-    function onCaptureAbandoned(e: { abandonReason: string }) {
-      setState((s) => ({ ...s, activeCapture: null }));
-      pushLog(`Capture abandoned: ${e.abandonReason}`);
+    function onCaptureAbandoned(e: { captureId: string; playerId: string; abandonReason: string }) {
+      setState((s) => (s.activeCapture?.captureId === e.captureId ? { ...s, activeCapture: null } : s));
+      if (e.playerId === ownPlayerIdRef.current) pushLog(`Capture abandoned: ${e.abandonReason}`);
     }
     function onScanRejected(e: { raw: string; reason: string }) {
       setState((s) => ({ ...s, lastRejection: { raw: e.raw, reason: e.reason, atMs: Date.now() } }));
       pushLog(`Scan rejected: ${e.reason}`);
     }
-    function onTagInflicted() {
-      pushLog('You tagged someone!');
-      setState((s) => ({ ...s, lastFeedbackEvent: { kind: 'tagInflicted', atMs: Date.now() } }));
+    /** "Bob (Red Raiders)" when the team resolves, "Bob" when it doesn't. Reads teams from a
+     * ref rather than state so this stays a pure lookup outside any reducer. */
+    function describeOther(e: { otherPlayerName?: string; otherTeamId?: string | null }): string {
+      const name = e.otherPlayerName?.trim() || 'another player';
+      const team = e.otherTeamId ? teamsRef.current.find((t) => t.teamId === e.otherTeamId) : null;
+      return team ? `${name} (${team.teamName})` : name;
     }
-    function onTagReceived() {
-      pushLog('You were tagged!');
-      setState((s) => ({ ...s, lastFeedbackEvent: { kind: 'tagReceived', atMs: Date.now() } }));
+    function onTagInflicted(e: TagEventPayload) {
+      pushLog(`You tagged ${describeOther(e)}!`);
+      setState((s) => ({
+        ...s,
+        lastFeedbackEvent: { kind: 'tagInflicted', atMs: Date.now(), otherPlayerName: e.otherPlayerName ?? null },
+      }));
+    }
+    function onTagReceived(e: TagEventPayload) {
+      pushLog(`${describeOther(e)} tagged you!`);
+      setState((s) => ({
+        ...s,
+        lastFeedbackEvent: { kind: 'tagReceived', atMs: Date.now(), otherPlayerName: e.otherPlayerName ?? null },
+      }));
     }
     function onRespawnCompleted() {
       pushLog('Respawned');

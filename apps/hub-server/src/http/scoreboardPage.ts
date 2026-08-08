@@ -5,6 +5,8 @@
  * no CDN (HUB-152's "no CDN" spirit applies here too, even though that requirement is
  * written against the main Web App).
  */
+import { MAP_VIEW_CSS, MAP_VIEW_SCRIPT } from './mapView.js';
+
 export const SCOREBOARD_HTML = `<!doctype html>
 <html>
 <head>
@@ -25,8 +27,12 @@ export const SCOREBOARD_HTML = `<!doctype html>
   .swatch { width: 28px; height: 28px; border-radius: 6px; flex: none; }
   .team-name { flex: 0 0 220px; font-weight: 600; }
   .bar-track { flex: 1; height: 28px; background: #1c1f26; border-radius: 6px; overflow: hidden; }
-  .bar-fill { height: 100%; }
+  .bar-fill { height: 100%; transition: width 0.3s linear; }
   .score-pct { flex: 0 0 90px; text-align: right; font-variant-numeric: tabular-nums; }
+  .score-delta { flex: 0 0 84px; text-align: right; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+  .score-delta-up { color: #3ddc73; }
+  .score-delta-down { color: #ff6b6b; }
+  .score-delta-flat { color: #5a6070; }
   #cps { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 32px; }
   .cp-card { background: #1c1f26; border-radius: 10px; padding: 16px; }
   .cp-name { font-size: 1.1rem; opacity: 0.8; margin-bottom: 8px; }
@@ -43,6 +49,7 @@ export const SCOREBOARD_HTML = `<!doctype html>
   #ticker { font-size: 1.1rem; opacity: 0.85; line-height: 1.6; max-height: 200px; overflow-y: auto; }
   #ticker div { border-left: 3px solid #444; padding-left: 10px; margin-bottom: 6px; }
   .ticker-time { opacity: 0.6; font-variant-numeric: tabular-nums; }
+${MAP_VIEW_CSS}
 </style>
 </head>
 <body>
@@ -50,6 +57,11 @@ export const SCOREBOARD_HTML = `<!doctype html>
   <div id="timer">Waiting for a session…</div>
   <div id="teams"></div>
   <div id="cps"></div>
+  <div id="map-section" hidden>
+    <h2>Live map</h2>
+    <div id="map-wrap"></div>
+    <div class="map-note">Positions are GPS fixes from each player's phone; the shaded ring is the reported accuracy.</div>
+  </div>
   <h2>Players</h2>
   <div id="players-wrap">
     <table id="players">
@@ -65,16 +77,38 @@ export const SCOREBOARD_HTML = `<!doctype html>
   <div id="ticker"></div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script>${MAP_VIEW_SCRIPT}</script>
   <script>
     const socket = io({ transports: ['websocket', 'polling'] });
     let teams = [];
     let controlPoints = [];
     let session = null;
     let players = [];
+    let respawnLocations = [];
+    // Server-controlled (SPECTATOR_SHOW_POSITIONS): when off, the roster carries no
+    // coordinates at all and the map section stays hidden rather than rendering empty.
+    let showPositions = false;
+    // Wall-clock time each player's position last CHANGED, so the map can mark a fix as
+    // stale. The roster poll returns the same coordinates every 3 s for a stationary or
+    // disconnected player alike, so poll time alone can't distinguish them.
+    const positionChangedAtMs = {};
+    // Percentage-point change since the previous score update, keyed by teamId - drives
+    // the ▲/▼ delta indicator. Undefined until a team's score has been patched at least
+    // once (there's nothing to compare the very first value against).
+    let scoreDeltaByTeamId = {};
 
     function teamById(id) { return teams.find((t) => t.teamId === id); }
     function playerById(id) { return players.find((p) => p.playerId === id); }
     function cpById(id) { return controlPoints.find((c) => c.controlPointId === id); }
+
+    function deltaHtml(teamId) {
+      const d = scoreDeltaByTeamId[teamId];
+      if (d === undefined || Math.abs(d) < 0.05) return '<span class="score-delta score-delta-flat">—</span>';
+      const cls = d > 0 ? 'score-delta-up' : 'score-delta-down';
+      const arrow = d > 0 ? '▲' : '▼';
+      const sign = d > 0 ? '+' : '';
+      return \`<span class="score-delta \${cls}">\${arrow} \${sign}\${d.toFixed(1)}%</span>\`;
+    }
 
     function render() {
       const teamsWithPlayers = teams.filter((t) => players.some((p) => p.teamId === t.teamId));
@@ -85,8 +119,9 @@ export const SCOREBOARD_HTML = `<!doctype html>
         <div class="team-row">
           <div class="swatch" style="background:\${t.hexColor}"></div>
           <div class="team-name">\${t.teamName}</div>
-          <div class="bar-track"><div class="bar-fill" style="width:\${Math.round(t.score * 100)}%;background:\${t.hexColor}"></div></div>
-          <div class="score-pct">\${Math.round(t.score * 100)}%</div>
+          <div class="bar-track"><div class="bar-fill" style="width:\${(t.score * 100).toFixed(1)}%;background:\${t.hexColor}"></div></div>
+          <div class="score-pct">\${(t.score * 100).toFixed(1)}%</div>
+          \${deltaHtml(t.teamId)}
         </div>\`).join('');
 
       const cpsEl = document.getElementById('cps');
@@ -124,9 +159,37 @@ export const SCOREBOARD_HTML = `<!doctype html>
         </tr>\`;
       }).join('');
 
-      document.getElementById('timer').textContent = session
-        ? 'Session in progress: ' + session.sessionName
-        : 'No session running';
+      renderMap();
+      document.getElementById('timer').textContent = timerText();
+    }
+
+    function renderMap() {
+      const section = document.getElementById('map-section');
+      section.hidden = !showPositions;
+      if (!showPositions) return;
+      renderMapSvg(
+        document.getElementById('map-wrap'),
+        {
+          controlPoints,
+          respawnLocations,
+          players: players.map((p) => ({ ...p, atMs: positionChangedAtMs[p.playerId] })),
+          teamById,
+        },
+        { height: 420 },
+      );
+    }
+    // The SVG is sized from the container's pixel width, so it has to be redrawn on resize
+    // (and on the venue TV's orientation change) rather than scaling with CSS.
+    window.addEventListener('resize', renderMap);
+
+    function timerText() {
+      if (!session) return 'No session running';
+      if (session.gameDurationMs == null) return 'Session in progress: ' + session.sessionName;
+      const remainingMs = Math.max(0, Date.parse(session.startTimestamp) + session.gameDurationMs - Date.now());
+      const totalSeconds = Math.floor(remainingMs / 1000);
+      const mm = Math.floor(totalSeconds / 60);
+      const ss = String(totalSeconds % 60).padStart(2, '0');
+      return session.sessionName + ' — ' + mm + ':' + ss + ' remaining';
     }
 
     // Players aren't part of state:snapshot/state:patch for spectators (HUB-094 - no
@@ -135,8 +198,27 @@ export const SCOREBOARD_HTML = `<!doctype html>
     function pollPlayers() {
       socket.emit('spectator:players:list', {}, (res) => {
         if (res && res.ok) {
+          showPositions = res.showPositions === true;
+          const nowMs = Date.now();
+          for (const p of res.players) {
+            const prev = players.find((x) => x.playerId === p.playerId);
+            if (!prev || prev.locationLat !== p.locationLat || prev.locationLong !== p.locationLong) {
+              if (typeof p.locationLat === 'number') positionChangedAtMs[p.playerId] = nowMs;
+            }
+          }
           players = res.players;
           render();
+        }
+      });
+    }
+
+    // Static geometry - polled far less often than players, and only to pick up an admin
+    // adding a respawn point mid-game.
+    function pollRespawnLocations() {
+      socket.emit('spectator:respawnLocations:list', {}, (res) => {
+        if (res && res.ok) {
+          respawnLocations = res.respawnLocations;
+          renderMap();
         }
       });
     }
@@ -160,12 +242,17 @@ export const SCOREBOARD_HTML = `<!doctype html>
       renderTicker();
     }
     setInterval(renderTicker, 1000);
+    // Independent of render()'s patch-driven calls, so the countdown ticks down smoothly
+    // once a second instead of jumping only when a qrCtfTeam/qrCtfControlPoint patch happens.
+    setInterval(() => { document.getElementById('timer').textContent = timerText(); }, 1000);
 
     socket.on('connect', () => {
       socket.emit('session:hello', { role: 'spectator' }, () => {});
       pollPlayers();
+      pollRespawnLocations();
     });
     setInterval(pollPlayers, 3000);
+    setInterval(pollRespawnLocations, 30000);
 
     socket.on('state:snapshot', (snap) => {
       teams = snap.teams;
@@ -175,14 +262,13 @@ export const SCOREBOARD_HTML = `<!doctype html>
     });
 
     socket.on('state:patch', ({ type, id, patch }) => {
-      const applyTo = (list) => {
-        const idx = list.findIndex((x) => Object.values(x).includes(id) || x[Object.keys(x)[0]] === id);
-      };
       if (type === 'qrCtfTeam') {
         const idx = teams.findIndex((t) => t.teamId === id);
-        if (patch === null) { if (idx >= 0) teams.splice(idx, 1); }
-        else if (idx >= 0) teams[idx] = { ...teams[idx], ...patch };
-        else teams.push(patch);
+        if (patch === null) { if (idx >= 0) teams.splice(idx, 1); delete scoreDeltaByTeamId[id]; }
+        else if (idx >= 0) {
+          if (typeof patch.score === 'number') scoreDeltaByTeamId[id] = (patch.score - teams[idx].score) * 100;
+          teams[idx] = { ...teams[idx], ...patch };
+        } else teams.push(patch);
       } else if (type === 'qrCtfControlPoint') {
         const idx = controlPoints.findIndex((c) => c.controlPointId === id);
         if (patch === null) { if (idx >= 0) controlPoints.splice(idx, 1); }
@@ -200,7 +286,9 @@ export const SCOREBOARD_HTML = `<!doctype html>
       session = null;
       render();
     });
-    socket.on('capture:started', (e) => {
+    // capture:occurred, not capture:started - the latter is scoped to the capturing player's
+    // room so only they see a progress ring (see gameEvents.ts).
+    socket.on('capture:occurred', (e) => {
       const cp = cpById(e.controlPointId);
       const player = playerById(e.playerId);
       ticker((player?.playerName ?? 'A player') + ' started capturing ' + (cp?.controlPointName ?? 'a control point'));

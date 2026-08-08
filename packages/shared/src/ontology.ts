@@ -73,6 +73,10 @@ export interface QrCtfPlayer {
   profilePicture: AttachmentRef | null;
   locationLat: number | null;
   locationLong: number | null;
+  /** Reported accuracy of the last fix, in metres (GeolocationCoordinates.accuracy). Kept so
+   * the map can draw an honest uncertainty halo instead of implying every fix is exact, and
+   * so a wildly imprecise fix is recognisable as such after the game. */
+  locationAccuracyM: number | null;
   /** Hub-local only, never synced (doc01 §4.2 "deliberately not in the ontology"). Used to
    * resume identity from localStorage (HUB-151). Not part of the Foundry-mirrored shape,
    * but co-located here since it lives on the same record in every store impl. */
@@ -95,6 +99,10 @@ export interface QrCtfSession {
   startTimestamp: Iso8601;
   endTimestamp: Iso8601 | null;
   captureDurationMs: number; // immutable snapshot (HUB-048)
+  /** Optional admin-set game length. null = no clock (session runs until manually
+   * stopped). When set, the Hub auto-ends the session once startTimestamp + this has
+   * elapsed; clients derive remaining time from startTimestamp + this - now(). */
+  gameDurationMs: number | null;
 }
 
 export interface QrCtfPlayerSession {
@@ -189,20 +197,37 @@ export interface ControlPointNodeRecord {
   rssi: number | null;
 }
 
-/** doc01 §4.4 — HUB-044. Fixed; no team CRUD in the Admin UI (HUB-045). */
+/**
+ * doc01 §4.4 — HUB-044. Fixed; no team CRUD in the Admin UI (HUB-045).
+ *
+ * Six teams, not the original eight, and every color fully saturated (2026-08-08, after
+ * testing against real hardware). Two things drove this:
+ *
+ * 1. **Saturation.** On an emissive LED the *minimum* RGB channel isn't part of the hue —
+ *    it's white light emitted on top of it. The original values were picked to look right on
+ *    a screen, where a light tint reads correctly against a white page; on a bare LED with no
+ *    reference they just read as pale. Every color here has a minimum channel of 0.
+ * 2. **Only ~6 hues are reliably distinguishable** on a cheap RGB LED at playing distance.
+ *    Pink Panthers (#EA76DD, 50% saturated) and Grey Ghosts (#7D7D7D, 0% — literally white at
+ *    half brightness, and indistinguishable from the neutral/unowned #FFFFFF) were dropped
+ *    rather than recolored into hues that would collide with what's left.
+ *
+ * Orange is the one value that isn't a pure hue-preserving rescale: green contributes ~3.4x
+ * more perceived brightness than red at equal drive (Rec. 709 luma), so a hue-exact #FF7700
+ * still reads yellow. Its green channel is cut further to land on orange to the eye.
+ */
 export const SEED_TEAMS: ReadonlyArray<Pick<QrCtfTeam, 'teamId' | 'teamName' | 'hexColor'>> = [
-  { teamId: 'e9b2b516-6c79-4e30-8177-32de66a37f29', teamName: 'Blue Bandits', hexColor: '#3A48EA' },
-  { teamId: '38c7ae2e-259d-42df-a13d-496dd7375dc8', teamName: 'Red Raiders', hexColor: '#EE2D2D' },
-  { teamId: 'cfa98610-1b23-4979-a733-18ba106a6f41', teamName: 'Green Goblins', hexColor: '#00E301' },
+  { teamId: 'e9b2b516-6c79-4e30-8177-32de66a37f29', teamName: 'Blue Bandits', hexColor: '#0014FF' },
+  { teamId: '38c7ae2e-259d-42df-a13d-496dd7375dc8', teamName: 'Red Raiders', hexColor: '#FF0000' },
+  { teamId: 'cfa98610-1b23-4979-a733-18ba106a6f41', teamName: 'Green Goblins', hexColor: '#00FF01' },
   { teamId: '718a369c-cfce-4814-9bf5-e934125d90a8', teamName: 'Yellow Yaks', hexColor: '#FFFF00' },
-  { teamId: '4f0cb7d5-5b11-4175-8a9c-4853f5fe2d2b', teamName: 'Cyan Cyclones', hexColor: '#00EAEA' },
-  { teamId: '860d1e6b-57c1-4e7b-b234-1744c071e962', teamName: 'Pink Panthers', hexColor: '#EA76DD' },
-  { teamId: '1949c46d-8759-4b66-9976-04ae17d9ee34', teamName: 'Grey Ghosts', hexColor: '#7D7D7D' },
-  { teamId: 'a2e4f279-ad40-4424-9ab9-f7be0247bbbf', teamName: 'Orange Orcs', hexColor: '#F07D19' },
+  { teamId: '4f0cb7d5-5b11-4175-8a9c-4853f5fe2d2b', teamName: 'Cyan Cyclones', hexColor: '#00FFFF' },
+  { teamId: 'a2e4f279-ad40-4424-9ab9-f7be0247bbbf', teamName: 'Orange Orcs', hexColor: '#FF5000' },
 ] as const;
 
-/** doc01 HUB-046 — visually confusable color pairs on cheap WS2812 LEDs. */
+/** doc01 HUB-046 — visually confusable color pairs on cheap WS2812 LEDs. Both pairs are
+ * adjacent hues that full saturation makes better but not unambiguous, so they stay listed. */
 export const CONFUSABLE_COLOR_PAIRS: ReadonlyArray<readonly [string, string]> = [
-  ['#FFFF00', '#00E301'], // Yellow Yaks / Green Goblins
-  ['#3A48EA', '#00EAEA'], // Blue Bandits / Cyan Cyclones
+  ['#FFFF00', '#00FF01'], // Yellow Yaks / Green Goblins
+  ['#0014FF', '#00FFFF'], // Blue Bandits / Cyan Cyclones
 ] as const;

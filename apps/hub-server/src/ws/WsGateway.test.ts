@@ -39,6 +39,7 @@ const config: Config = {
   unclaimedHexColor: '#202020',
   adminPin: '1234',
   stationId: STATION_ID,
+  spectatorShowPositions: true,
 };
 
 function waitFor<T = unknown>(socket: ClientSocket, event: string): Promise<T> {
@@ -51,6 +52,9 @@ describe('WsGateway', () => {
   let store: InMemoryStore;
   let baseUrl: string;
   let unsubscribe: () => void;
+  /** Exposed so tests can drive tickCaptures() directly instead of waiting on the 5 Hz
+   * interval that only exists in index.ts. */
+  let engineRef: GameEngine;
   const clients: ClientSocket[] = [];
 
   beforeEach(async () => {
@@ -95,6 +99,7 @@ describe('WsGateway', () => {
       events: createSocketIoGameEvents(io),
     });
     engine.start();
+    engineRef = engine;
 
     unsubscribe = createWsGateway({ io, store, engine, config, stationId: STATION_ID, dispatcher, registry });
 
@@ -192,7 +197,7 @@ describe('WsGateway', () => {
     expect((await store.controlPoints.get('cp1'))?.capturingPlayerId).toBeNull();
   });
 
-  it('admin session:start then a player scan starts a capture, broadcast to everyone', async () => {
+  it('admin session:start then a player scan starts a capture for the scanning player', async () => {
     const admin = connect();
     await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
 
@@ -211,6 +216,147 @@ describe('WsGateway', () => {
 
     const captureStarted = await capturePromise;
     expect(captureStarted.controlPointId).toBe('cp1');
+  });
+
+  // The bug this pins: capture:started/capture:progress used to be io.emit'd to everyone, so
+  // every player's phone rendered a progress ring for somebody else's capture. The previous
+  // test passes under both the broken and the fixed routing (it only checks the capturing
+  // player receives it) - this is the one that actually catches a regression.
+  it('a capture is visible ONLY to the capturing player, not to other players', async () => {
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+
+    const capturer = connect();
+    const capturerAck = await new Promise<any>((resolve) => capturer.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(capturerAck.playerId, { teamId: TEAM_A });
+
+    const bystander = connect();
+    const bystanderAck = await new Promise<any>((resolve) => bystander.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(bystanderAck.playerId, { teamId: TEAM_B });
+
+    await new Promise<any>((resolve) => admin.emit('admin:session:start', { sessionName: 'R1' }, resolve));
+
+    let bystanderSawStarted = false;
+    let bystanderSawProgress = false;
+    bystander.on('capture:started', () => (bystanderSawStarted = true));
+    bystander.on('capture:progress', () => (bystanderSawProgress = true));
+
+    const capturePromise = waitFor<any>(capturer, 'capture:started');
+    capturer.emit('scan', { raw: `qrctf:1:cp:${CP_MAC}`, clientTs: Date.now() });
+    await capturePromise;
+
+    // Drive a few progress ticks so there is actually a progress stream to leak.
+    for (let i = 0; i < 3; i++) await engineRef.tickCaptures(STATION_ID);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(bystanderSawStarted).toBe(false);
+    expect(bystanderSawProgress).toBe(false);
+  });
+
+  it('spectators get capture:occurred (for the ticker) but never capture:started/progress', async () => {
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+
+    const player = connect();
+    const playerAck = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(playerAck.playerId, { teamId: TEAM_A });
+    await createPlayerOnTeam(TEAM_B);
+    await new Promise<any>((resolve) => admin.emit('admin:session:start', { sessionName: 'R1' }, resolve));
+
+    const spectator = connect();
+    await new Promise<any>((resolve) => spectator.emit('session:hello', { role: 'spectator' }, resolve));
+
+    let spectatorSawStarted = false;
+    spectator.on('capture:started', () => (spectatorSawStarted = true));
+    const occurredPromise = waitFor<any>(spectator, 'capture:occurred');
+
+    player.emit('scan', { raw: `qrctf:1:cp:${CP_MAC}`, clientTs: Date.now() });
+
+    const occurred = await occurredPromise;
+    expect(occurred.controlPointId).toBe('cp1');
+    expect(occurred.playerId).toBe(playerAck.playerId);
+    expect(spectatorSawStarted).toBe(false);
+  });
+
+  // playerSecret is a resume-by-secret credential and qrCodeToken lets anyone forge a tag
+  // against that player; the raw change feed used to put both on every player's socket.
+  it('a player never receives another player\'s qrCtfPlayer patch', async () => {
+    const watcher = connect();
+    await new Promise<any>((resolve) => watcher.emit('session:hello', { role: 'player' }, resolve));
+
+    const patches: any[] = [];
+    watcher.on('state:patch', (p) => patches.push(p));
+
+    const otherId = await createPlayerOnTeam(TEAM_B);
+    await store.players.update(otherId, { playerName: 'Mallory' } as any);
+    await new Promise((r) => setTimeout(r, 100));
+
+    const foreign = patches.filter((p) => p.type === 'qrCtfPlayer' && p.id === otherId);
+    expect(foreign).toHaveLength(0);
+  });
+
+  it('spectators never receive capturingPlayerId via the patch stream (HUB-094)', async () => {
+    const spectator = connect();
+    await new Promise<any>((resolve) => spectator.emit('session:hello', { role: 'spectator' }, resolve));
+
+    const patches: any[] = [];
+    spectator.on('state:patch', (p) => patches.push(p));
+
+    await store.controlPoints.update('cp1', { capturingPlayerId: 'player-xyz' } as any);
+    await new Promise((r) => setTimeout(r, 100));
+
+    const cpPatches = patches.filter((p) => p.type === 'qrCtfControlPoint');
+    expect(cpPatches.length).toBeGreaterThan(0);
+    for (const p of cpPatches) expect(p.patch.capturingPlayerId).toBeNull();
+  });
+
+  it('a location event records the player position and appends to their location series', async () => {
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+
+    const player = connect();
+    const ack = await new Promise<any>((resolve) => player.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(ack.playerId, { teamId: TEAM_A });
+    await createPlayerOnTeam(TEAM_B);
+    await new Promise<any>((resolve) => admin.emit('admin:session:start', { sessionName: 'R1' }, resolve));
+
+    player.emit('location', { lat: 51.5, long: -0.12, accuracyM: 8, clientTs: Date.now() });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const stored = await store.players.get(ack.playerId);
+    expect(stored?.locationLat).toBeCloseTo(51.5);
+    expect(stored?.locationLong).toBeCloseTo(-0.12);
+    expect((stored as any)?.locationAccuracyM).toBe(8);
+
+    const station = await store.stations.get(STATION_ID);
+    const sessionId = (station as any).currentSessionId;
+    const ps = (await store.playerSessions.list({ sessionId, playerId: ack.playerId } as any))[0] as any;
+    expect((await store.series.latest(ps.locationLatSeriesId))?.v).toBeCloseTo(51.5);
+    expect((await store.series.latest(ps.locationLongSeriesId))?.v).toBeCloseTo(-0.12);
+  });
+
+  // Players are created on first hello at any time, so someone joining after startSession
+  // used to have no playerSession at all - every series append for them silently no-op'd.
+  it('a player who joins mid-session still gets a playerSession and recorded stats', async () => {
+    const admin = connect();
+    await new Promise<any>((resolve) => admin.emit('session:hello', { role: 'admin', adminPin: '1234' }, resolve));
+    await createPlayerOnTeam(TEAM_A);
+    await createPlayerOnTeam(TEAM_B);
+    await new Promise<any>((resolve) => admin.emit('admin:session:start', { sessionName: 'R1' }, resolve));
+
+    const latecomer = connect();
+    const ack = await new Promise<any>((resolve) => latecomer.emit('session:hello', { role: 'player' }, resolve));
+    await store.players.update(ack.playerId, { teamId: TEAM_A });
+
+    const station = await store.stations.get(STATION_ID);
+    const sessionId = (station as any).currentSessionId;
+    expect(await store.playerSessions.list({ sessionId, playerId: ack.playerId } as any)).toHaveLength(0);
+
+    latecomer.emit('location', { lat: 1, long: 2, accuracyM: 5, clientTs: Date.now() });
+    await new Promise((r) => setTimeout(r, 100));
+
+    const ps = await store.playerSessions.list({ sessionId, playerId: ack.playerId } as any);
+    expect(ps).toHaveLength(1);
   });
 
   it('admin:node:claim creates a Control Point bound to the MAC', async () => {

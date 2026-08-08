@@ -27,6 +27,7 @@ const config: Config = {
   unclaimedHexColor: '#202020',
   adminPin: '1234',
   stationId: 'station-test',
+  spectatorShowPositions: true,
 };
 
 describe('nodeApp', () => {

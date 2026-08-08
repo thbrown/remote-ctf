@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { encodePlQr, encodeRpQr, isQrParseError, parseQr } from '@foundry-ctf/shared';
-import { formatRelativeTime, useNowTick } from '../relativeTime';
+import { formatCountdown, formatRelativeTime, useNowTick } from '../relativeTime';
 import { useGame } from '../useGame';
 import { AdminQrScanner } from './AdminQrScanner';
 import {
@@ -10,6 +10,7 @@ import {
   playPlayerDisconnectedFeedback,
 } from './feedback';
 import { QrThumbnail } from './QrThumbnail';
+import { describeGeoError, formatGeoStatus, ONE_SHOT_GEO_OPTIONS, type GeoStatus } from '../geolocation';
 
 interface NodeRow {
   mac: string;
@@ -89,14 +90,17 @@ export function AdminApp() {
   const { socket, state } = useGame('admin', submittedPin);
 
   const [sessionName, setSessionName] = useState('Round 1');
+  const [gameDurationMin, setGameDurationMin] = useState('');
   const [nodes, setNodes] = useState<NodeRow[]>([]);
   const [claimMac, setClaimMac] = useState('');
   const [claimName, setClaimName] = useState('');
   const [claimLat, setClaimLat] = useState('');
   const [claimLong, setClaimLong] = useState('');
+  const [claimFix, setClaimFix] = useState<GeoStatus | null>(null);
   const [respawnLocations, setRespawnLocations] = useState<RespawnLocationRow[]>([]);
   const [rpLat, setRpLat] = useState('');
   const [rpLong, setRpLong] = useState('');
+  const [rpFix, setRpFix] = useState<GeoStatus | null>(null);
   const [rpTeamIds, setRpTeamIds] = useState<string[]>([]);
   const [rpCustomId, setRpCustomId] = useState('');
   const [players, setPlayers] = useState<PlayerRow[]>([]);
@@ -166,6 +170,25 @@ export function AdminApp() {
     return <div className="admin-login">Connecting…</div>;
   }
 
+  /** One-shot GPS fix shared by the Control Point and Respawn Point scan flows. Reports the
+   * accuracy alongside the coordinates: a control point saved from a 500 m network-derived
+   * fix looks exactly like one saved from a 4 m GNSS fix until someone tries to plot it. */
+  function captureFix(apply: (lat: number, long: number) => void, setFix: (s: GeoStatus) => void) {
+    if (!('geolocation' in navigator)) {
+      setFix({ kind: 'unsupported' });
+      return;
+    }
+    setFix({ kind: 'searching' });
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        apply(pos.coords.latitude, pos.coords.longitude);
+        setFix({ kind: 'ok', accuracyM: pos.coords.accuracy, atMs: Date.now() });
+      },
+      (err) => setFix({ kind: 'error', message: describeGeoError(err) }),
+      ONE_SHOT_GEO_OPTIONS,
+    );
+  }
+
   function handleScan(raw: string) {
     const kind = scanning;
     setScanning(null);
@@ -182,16 +205,13 @@ export function AdminApp() {
       setClaimMac(qr.macAddress);
       // Best-effort: fill lat/long from wherever the admin is standing when they scan it,
       // same as the Respawn Point flow below - not fatal if denied/unavailable.
-      if ('geolocation' in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            setClaimLat(String(pos.coords.latitude));
-            setClaimLong(String(pos.coords.longitude));
-          },
-          () => {},
-          { timeout: 5000 },
-        );
-      }
+      captureFix(
+        (lat, long) => {
+          setClaimLat(String(lat));
+          setClaimLong(String(long));
+        },
+        setClaimFix,
+      );
     } else if (kind === 'rp') {
       if (qr.kind !== 'rp') {
         alert("That's not a Respawn Point QR code.");
@@ -201,16 +221,13 @@ export function AdminApp() {
       // Best-effort: fill lat/long from wherever the admin is standing when they scan it -
       // the QR itself only carries an ID, not a location. Not fatal if denied/unavailable;
       // the admin can still type coordinates by hand.
-      if ('geolocation' in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            setRpLat(String(pos.coords.latitude));
-            setRpLong(String(pos.coords.longitude));
-          },
-          () => {},
-          { timeout: 5000 },
-        );
-      }
+      captureFix(
+        (lat, long) => {
+          setRpLat(String(lat));
+          setRpLong(String(long));
+        },
+        setRpFix,
+      );
     }
   }
 
@@ -247,7 +264,9 @@ export function AdminApp() {
   const teamsWithPlayers = state.teams.filter((t) => teamIdsWithPlayers.includes(t.teamId));
 
   function startSession() {
-    socket.emit('admin:session:start', { sessionName }, (res: any) => {
+    const minutes = Number(gameDurationMin);
+    const gameDurationMs = gameDurationMin.trim() && Number.isFinite(minutes) && minutes > 0 ? minutes * 60000 : undefined;
+    socket.emit('admin:session:start', { sessionName, gameDurationMs }, (res: any) => {
       if (!res?.ok) {
         const message =
           res?.error === 'need_at_least_two_teams_with_players'
@@ -295,6 +314,13 @@ export function AdminApp() {
     );
   }
 
+  function removeControlPoint(controlPointId: string, controlPointName: string) {
+    if (!confirm(`Remove control point "${controlPointName}"?`)) return;
+    socket.emit('admin:controlPoint:remove', { controlPointId }, (res: any) => {
+      if (!res?.ok) alert(`Failed to remove control point: ${res?.error ?? 'unknown error'}`);
+    });
+  }
+
   function identifyNode(mac: string) {
     socket.emit('admin:node:identify', { macAddress: mac }, (res: any) => {
       if (res?.ok) alert('Identify sent — the node should blink white for ~3s.');
@@ -339,6 +365,11 @@ export function AdminApp() {
       <div className="status-line">
         <span className="status-pill">Connection: {state.status}</span>
         <span className="status-pill">Session: {state.session ? state.session.sessionName : 'none running'}</span>
+        {state.session?.gameDurationMs != null && (
+          <span className="status-pill">
+            Time left: {formatCountdown(state.session.startTimestamp, state.session.gameDurationMs, now)}
+          </span>
+        )}
       </div>
 
       <AdminSection title="Session" tone="session">
@@ -347,6 +378,13 @@ export function AdminApp() {
         ) : (
           <>
             <input value={sessionName} onChange={(e) => setSessionName(e.target.value)} placeholder="Session name" />
+            <input
+              value={gameDurationMin}
+              onChange={(e) => setGameDurationMin(e.target.value)}
+              placeholder="Game length (minutes, optional)"
+              type="number"
+              min="1"
+            />
             <div className="team-toggle-list">
               <span>Teams with players joined (these will be active):</span>
               {teamsWithPlayers.length === 0 && <span>— none yet</span>}
@@ -414,7 +452,7 @@ export function AdminApp() {
                       </div>
                     </td>
                     <td>{p.qrCodeClaimed && <QrThumbnail value={encodePlQr(p.qrCodeToken)} size={64} />}</td>
-                    <td><button className="btn-danger" onClick={() => removePlayer(p.playerId, p.playerName)}>Remove</button></td>
+                    <td className="row-actions"><button className="btn-danger" onClick={() => removePlayer(p.playerId, p.playerName)}>Remove</button></td>
                   </tr>
                 );
               })}
@@ -460,7 +498,10 @@ export function AdminApp() {
                   </td>
                   <td>{cp.locationLat != null && cp.locationLong != null ? `${cp.locationLat.toFixed(5)}, ${cp.locationLong.toFixed(5)}` : '—'}</td>
                   <td>{node?.rssi ?? '—'}</td>
-                  <td>{node && <button className="btn-ghost" onClick={() => identifyNode(node.mac)}>Identify</button>}</td>
+                  <td className="row-actions">
+                    {node && <button className="btn-ghost" onClick={() => identifyNode(node.mac)}>Identify</button>}{' '}
+                    <button className="btn-danger" onClick={() => removeControlPoint(cp.controlPointId, cp.controlPointName)}>Remove</button>
+                  </td>
                 </tr>
               );
             })}
@@ -476,6 +517,7 @@ export function AdminApp() {
           <button className="btn-ghost" onClick={() => setScanning('cp')}>Scan QR</button>
           <button onClick={claimNode}>Claim</button>
         </div>
+        {claimFix && <div className="geo-fix">{formatGeoStatus(claimFix)}</div>}
 
         {nodes.some((n) => !n.controlPointId) && (
           <>
@@ -512,6 +554,7 @@ export function AdminApp() {
           />
           <button className="btn-ghost" onClick={() => setScanning('rp')}>Scan QR</button>
         </div>
+        {rpFix && <div className="geo-fix">{formatGeoStatus(rpFix)}</div>}
         <div className="team-toggle-list">
           <span>Allowed teams (none checked = any team):</span>
           {state.teams.map((t) => (

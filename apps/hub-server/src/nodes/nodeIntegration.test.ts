@@ -35,6 +35,7 @@ const config: Config = {
   unclaimedHexColor: '#202020',
   adminPin: '1234',
   stationId: 'station-test',
+  spectatorShowPositions: true,
 };
 
 const MAC = 'AA:BB:CC:DD:EE:01';

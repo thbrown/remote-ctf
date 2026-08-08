@@ -19,6 +19,7 @@ import { isQrParseError, parseQr } from '@foundry-ctf/shared';
 import type {
   CaptureAbandonedEvent,
   CaptureCompletedEvent,
+  CaptureProgressEvent,
   CaptureStartedEvent,
   RespawnCompletedEvent,
   ScanRejectReason,
@@ -26,11 +27,12 @@ import type {
   TagOccurredEvent,
 } from '@foundry-ctf/shared';
 import type { GameStateStore } from '../store/GameStateStore.js';
+import type { SeriesValue } from '../store/TimeSeriesStore.js';
 import type { Clock } from './Clock.js';
 
 export interface GameEngineEvents {
   captureStarted(e: CaptureStartedEvent): void;
-  captureProgress(e: { captureId: string; progress: number; isHumanDetected: boolean }): void;
+  captureProgress(e: CaptureProgressEvent): void;
   captureCompleted(e: CaptureCompletedEvent): void;
   /** Same completion, but delivered only to the player who did the capturing - for
    * personal feedback (haptics/sound) that shouldn't fire for every player whenever
@@ -88,6 +90,9 @@ export class GameEngine {
   private readonly capturesCompletedCountByPlayer = new Map<string, number>();
   private readonly tagsInflictedCountByPlayer = new Map<string, number>();
   private readonly tagsReceivedCountByPlayer = new Map<string, number>();
+  /** Last presence value seen per control point, so isHumanDetected history records only
+   * actual transitions rather than every heartbeat rewrite. */
+  private readonly lastPresenceByControlPointId = new Map<string, boolean>();
 
   private unsubscribeStore: (() => void) | null = null;
 
@@ -119,11 +124,36 @@ export class GameEngine {
   }
 
   private onPresenceChanged(controlPointId: string, detected: boolean): void {
+    // Edge-triggered: nodeApp rewrites isHumanDetected on every presence post and heartbeat,
+    // so the change feed fires constantly even when the value is unchanged. Recording every
+    // one of those would bloat the NDJSON with no added information.
+    if (this.lastPresenceByControlPointId.get(controlPointId) !== detected) {
+      this.lastPresenceByControlPointId.set(controlPointId, detected);
+      void this.recordPresenceTransition(controlPointId, detected);
+    }
+
     const captureId = this.captureIdByControlPointId.get(controlPointId);
     if (!captureId) return;
     const rt = this.captureRuntimeById.get(captureId);
     if (!rt) return;
     rt.presenceLostSinceMonoMs = detected ? null : this.clock.now();
+  }
+
+  /** Fire-and-forget: presence history is telemetry, and the capture FSM above must not wait
+   * on (or be broken by) a store write. */
+  private async recordPresenceTransition(controlPointId: string, detected: boolean): Promise<void> {
+    try {
+      const cp = await this.store.controlPoints.get(controlPointId);
+      if (!cp) return;
+      const station = await this.store.stations.get(cp.stationId);
+      const sessionId = (station as any)?.currentSessionId as string | undefined;
+      if (!sessionId) return;
+      const cpSession = (await this.store.controlPointSessions.list({ sessionId, controlPointId } as any))[0] as any;
+      if (!cpSession) return;
+      await this.appendSeries(this.store, cpSession.isHumanDetectedHistorySeriesId, detected);
+    } catch (err) {
+      console.error(`[engine] presence history append failed (controlPointId=${controlPointId}):`, err);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -135,6 +165,12 @@ export class GameEngine {
     const stations = await this.store.stations.list();
     for (const station of stations as any[]) {
       if (!station.currentSessionId) continue;
+      // Worth saying out loud: from the players' side a restart looks like the game just
+      // vanishing, and all scoring state (hold-seconds) is engine-memory only, so there is
+      // nothing to resume even in principle.
+      console.warn(
+        `[engine] HUB-016: session ${station.currentSessionId} was still running at boot - ending it, not resuming. Scores are not recoverable.`,
+      );
       await this.store.batch(async (tx) => {
         await tx.sessions.update(station.currentSessionId, { endTimestamp: this.wallClockIso() });
         const inProgress = await tx.captures.list({ captureStatus: 'in_progress' } as any);
@@ -174,10 +210,16 @@ export class GameEngine {
     this.capturesCompletedCountByPlayer.clear();
     this.tagsInflictedCountByPlayer.clear();
     this.tagsReceivedCountByPlayer.clear();
+    this.lastPresenceByControlPointId.clear();
   }
 
   /** HUB-165. */
-  async startSession(stationId: string, sessionName: string, activeTeamIds: string[]): Promise<QrCtfSession> {
+  async startSession(
+    stationId: string,
+    sessionName: string,
+    activeTeamIds: string[],
+    gameDurationMs: number | null = null,
+  ): Promise<QrCtfSession> {
     const station = await this.store.stations.get(stationId);
     if (!station) throw new Error(`station ${stationId} not found`);
 
@@ -190,6 +232,7 @@ export class GameEngine {
         startTimestamp: this.wallClockIso(),
         endTimestamp: null,
         captureDurationMs: (station as any).captureDurationMs, // HUB-048: snapshot once
+        gameDurationMs,
       });
       await tx.stations.update(stationId, { currentSessionId: session.sessionId });
 
@@ -214,27 +257,7 @@ export class GameEngine {
 
       const players = await tx.players.list({ stationId } as any);
       for (const player of players as QrCtfPlayer[]) {
-        const [locationLatSeriesId, locationLongSeriesId, isAliveSeriesId, tagsInflictedSeriesId, tagsReceivedSeriesId, capturesCompletedSeriesId] =
-          await Promise.all([
-            tx.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'locationLat', valueType: 'double' }),
-            tx.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'locationLong', valueType: 'double' }),
-            tx.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'isAlive', valueType: 'boolean' }),
-            tx.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'tagsInflicted', valueType: 'int' }),
-            tx.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'tagsReceived', valueType: 'int' }),
-            tx.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'capturesCompleted', valueType: 'int' }),
-          ]);
-        await tx.playerSessions.create({
-          playerSessionId: randomUUID(),
-          sessionId: session.sessionId,
-          playerId: player.playerId,
-          teamId: player.teamId,
-          locationLatSeriesId,
-          locationLongSeriesId,
-          isAliveSeriesId,
-          tagsInflictedSeriesId,
-          tagsReceivedSeriesId,
-          capturesCompletedSeriesId,
-        });
+        await this.ensurePlayerSession(tx, player, session.sessionId);
         await tx.players.update(player.playerId, { playerStatus: 'active', sessionId: session.sessionId });
       }
 
@@ -265,6 +288,69 @@ export class GameEngine {
     this.resetRuntimeState();
     this.events.sessionStarted(session.sessionId);
     return session;
+  }
+
+  /**
+   * The single path for every series append in the engine, wrapping two hazards.
+   *
+   * Series points are wall-clock stamped — they record when something happened in real
+   * time, unlike durations, which use the injected monotonic clock (HUB-062). But
+   * TimeSeriesStore.append rejects any `t` older than the last point (HUB-061), so a
+   * wall-clock step backwards — NTP correcting the Pi's clock mid-game is the realistic
+   * case — would throw straight out of tickScoring/completeCapture and silently kill
+   * scoring for the rest of the match. Clamp to the last timestamp instead.
+   *
+   * And an append failing at all must never abort game logic: telemetry is strictly
+   * secondary to the match running.
+   */
+  private async appendSeries(store: GameStateStore, seriesId: string, v: SeriesValue): Promise<void> {
+    try {
+      const last = await store.series.latest(seriesId);
+      const now = Date.now();
+      await store.series.append(seriesId, { t: last && now < last.t ? last.t : now, v });
+    } catch (err) {
+      console.error(`[engine] series append failed (seriesId=${seriesId}):`, err);
+    }
+  }
+
+  /**
+   * Provisions a player's QrCtfPlayerSession and its six series for `sessionId`, if it
+   * doesn't exist yet. Idempotent, and takes the store handle explicitly so it works both
+   * inside startSession's batch (`tx`) and on the lazy path outside one (`this.store`).
+   *
+   * The lazy path matters: players are created on first `session:hello` at any time
+   * (WsGateway), so anyone joining after startSession used to have no playerSession at
+   * all — every series append for them silently no-op'd and their stats read as zero for
+   * the rest of the game.
+   */
+  private async ensurePlayerSession(store: GameStateStore, player: QrCtfPlayer, sessionId: string): Promise<void> {
+    const existing = await store.playerSessions.list({ sessionId, playerId: player.playerId } as any);
+    if (existing.length > 0) return;
+
+    const [locationLatSeriesId, locationLongSeriesId, isAliveSeriesId, tagsInflictedSeriesId, tagsReceivedSeriesId, capturesCompletedSeriesId] =
+      await Promise.all([
+        store.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'locationLat', valueType: 'double' }),
+        store.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'locationLong', valueType: 'double' }),
+        store.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'isAlive', valueType: 'boolean' }),
+        store.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'tagsInflicted', valueType: 'int' }),
+        store.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'tagsReceived', valueType: 'int' }),
+        store.series.createSeries({ ownerType: 'qrCtfPlayerSession', ownerId: player.playerId, property: 'capturesCompleted', valueType: 'int' }),
+      ]);
+    await store.playerSessions.create({
+      playerSessionId: randomUUID(),
+      sessionId,
+      playerId: player.playerId,
+      teamId: player.teamId,
+      locationLatSeriesId,
+      locationLongSeriesId,
+      isAliveSeriesId,
+      tagsInflictedSeriesId,
+      tagsReceivedSeriesId,
+      capturesCompletedSeriesId,
+    });
+    // Every alive/dead track needs a defined starting state, or a reader can't tell
+    // "was active the whole time" from "never recorded anything".
+    await this.appendSeries(store, isAliveSeriesId, true);
   }
 
   /** HUB-108 (session_ended) + HUB-133. */
@@ -317,6 +403,10 @@ export class GameEngine {
       this.events.scanRejected(playerId, raw, 'unknown_qr');
       return;
     }
+    // A player who joined after startSession has no playerSession yet; provision it here so
+    // their very first scan is already recorded. Idempotent, so this is a cheap no-op for
+    // everyone who was present at session start.
+    await this.ensureCurrentPlayerSession(playerId);
     switch (parsed.kind) {
       case 'cp':
         return this.attemptCapture(playerId, raw, parsed.macAddress);
@@ -325,6 +415,38 @@ export class GameEngine {
       case 'rp':
         return this.attemptRespawn(playerId, raw, parsed.respawnLocationId);
     }
+  }
+
+  /** ensurePlayerSession against whatever session is currently running, if any. */
+  async ensureCurrentPlayerSession(playerId: string): Promise<void> {
+    const player = await this.store.players.get(playerId);
+    if (!player) return;
+    const session = await this.getRunningSession(player);
+    if (!session) return;
+    await this.ensurePlayerSession(this.store, player, session.sessionId);
+  }
+
+  /**
+   * Records a GPS fix: last-known position on the player row (what the live map reads) plus
+   * a point on each of the player's location series (what the replay/export reads). The
+   * series half only happens while a session is running — position outside a match isn't
+   * part of any match's history, and there'd be no playerSession to hang it off.
+   *
+   * HUB-175: informational only. This must never gate a game outcome, so it deliberately
+   * has no proximity checks and never rejects.
+   */
+  async recordPlayerLocation(playerId: string, lat: number, long: number, accuracyM: number | null): Promise<void> {
+    const player = await this.store.players.get(playerId);
+    if (!player) return;
+    await this.store.players.update(playerId, { locationLat: lat, locationLong: long, locationAccuracyM: accuracyM });
+
+    const session = await this.getRunningSession(player);
+    if (!session) return;
+    await this.ensurePlayerSession(this.store, player, session.sessionId);
+    const ps = (await this.store.playerSessions.list({ sessionId: session.sessionId, playerId } as any))[0] as any;
+    if (!ps) return;
+    await this.appendSeries(this.store, ps.locationLatSeriesId, lat);
+    await this.appendSeries(this.store, ps.locationLongSeriesId, long);
   }
 
   private reject(playerId: string, raw: string, reason: ScanRejectReason): void {
@@ -427,7 +549,7 @@ export class GameEngine {
       const elapsed = this.clock.now() - rt.startMonoMs;
       const progress = Math.min(1, elapsed / session.captureDurationMs);
       await this.store.controlPoints.update(rt.controlPointId, { captureProgress: progress });
-      this.events.captureProgress({ captureId, progress, isHumanDetected: cp?.isHumanDetected ?? false });
+      this.events.captureProgress({ captureId, playerId: rt.playerId, progress, isHumanDetected: cp?.isHumanDetected ?? false });
 
       if (progress >= 1) {
         await this.completeCapture(captureId);
@@ -454,10 +576,7 @@ export class GameEngine {
 
     const cpSessions = await this.store.controlPointSessions.list({ sessionId: capture.sessionId, controlPointId: rt.controlPointId } as any);
     if (cpSessions[0]) {
-      await this.store.series.append((cpSessions[0] as any).ownerHistorySeriesId, {
-        t: Date.now(),
-        v: capture.capturingTeamId,
-      });
+      await this.appendSeries(this.store, (cpSessions[0] as any).ownerHistorySeriesId, capture.capturingTeamId);
     }
 
     const playerSessions = await this.store.playerSessions.list({ sessionId: capture.sessionId, playerId: rt.playerId } as any);
@@ -465,7 +584,7 @@ export class GameEngine {
       const prevCount = this.capturesCompletedCountByPlayer.get(rt.playerId) ?? 0;
       const nextCount = prevCount + 1;
       this.capturesCompletedCountByPlayer.set(rt.playerId, nextCount);
-      await this.store.series.append((playerSessions[0] as any).capturesCompletedSeriesId, { t: Date.now(), v: nextCount });
+      await this.appendSeries(this.store, (playerSessions[0] as any).capturesCompletedSeriesId, nextCount);
     }
 
     if (cp?.macAddress) {
@@ -505,7 +624,7 @@ export class GameEngine {
     this.captureIdByControlPointId.delete(rt.controlPointId);
     this.captureIdByPlayerId.delete(rt.playerId);
 
-    this.events.captureAbandoned({ captureId, abandonReason: reason });
+    this.events.captureAbandoned({ captureId, playerId: rt.playerId, abandonReason: reason });
   }
 
   /** Client-initiated cancel (HUB-107's sibling: voluntary, not a tag). */
@@ -513,6 +632,14 @@ export class GameEngine {
     const activeCaptureId = this.captureIdByPlayerId.get(playerId);
     if (activeCaptureId !== captureId) return;
     await this.abandonCapture(captureId, 'player_cancelled');
+  }
+
+  /** Admin is deleting this Control Point — cleanly abort any capture in progress on it
+   * first, so the capturing player's client doesn't end up with a dangling activeCapture. */
+  async abandonCaptureForControlPoint(controlPointId: string): Promise<void> {
+    const captureId = this.captureIdByControlPointId.get(controlPointId);
+    if (!captureId) return;
+    await this.abandonCapture(captureId, 'session_ended');
   }
 
   // ---- Tagging (HUB-110..113) ----
@@ -562,11 +689,28 @@ export class GameEngine {
     await this.store.players.update(target.playerId, { playerStatus: 'tagged_out' });
     this.lastTagAtMonoMsByPair.set(pairKey, this.clock.now());
 
+    // The falling edge of isAlive - attemptRespawn records the rising one. Without both,
+    // the alive/dead timeline can't be reconstructed from the series at all.
+    const targetPs = (await this.store.playerSessions.list({ sessionId: session.sessionId, playerId: target.playerId } as any))[0] as any;
+    if (targetPs) await this.appendSeries(this.store, targetPs.isAliveSeriesId, false);
+
     await this.bumpTeamTagCounters(source.teamId as string, target.teamId as string, session.sessionId);
     await this.appendPlayerTagSeries(sourcePlayerId, target.playerId, session.sessionId);
 
-    this.events.tagInflicted(sourcePlayerId, { tagId: tag.tagId, otherPlayerId: target.playerId });
-    this.events.tagReceived(target.playerId, { tagId: tag.tagId, otherPlayerId: sourcePlayerId });
+    // Each side gets the OTHER player's name/team, so their client can say who without ever
+    // holding a roster of other players (HUB-094).
+    this.events.tagInflicted(sourcePlayerId, {
+      tagId: tag.tagId,
+      otherPlayerId: target.playerId,
+      otherPlayerName: target.playerName,
+      otherTeamId: target.teamId,
+    });
+    this.events.tagReceived(target.playerId, {
+      tagId: tag.tagId,
+      otherPlayerId: sourcePlayerId,
+      otherPlayerName: source.playerName,
+      otherTeamId: source.teamId,
+    });
     this.events.tagOccurred({
       tagId: tag.tagId,
       sourcePlayerId,
@@ -595,13 +739,13 @@ export class GameEngine {
     if (sourcePs) {
       const nextInflicted = (this.tagsInflictedCountByPlayer.get(sourcePlayerId) ?? 0) + 1;
       this.tagsInflictedCountByPlayer.set(sourcePlayerId, nextInflicted);
-      await this.store.series.append(sourcePs.tagsInflictedSeriesId, { t: Date.now(), v: nextInflicted });
+      await this.appendSeries(this.store, sourcePs.tagsInflictedSeriesId, nextInflicted);
     }
     const targetPs = (await this.store.playerSessions.list({ sessionId, playerId: targetPlayerId } as any))[0] as any;
     if (targetPs) {
       const nextReceived = (this.tagsReceivedCountByPlayer.get(targetPlayerId) ?? 0) + 1;
       this.tagsReceivedCountByPlayer.set(targetPlayerId, nextReceived);
-      await this.store.series.append(targetPs.tagsReceivedSeriesId, { t: Date.now(), v: nextReceived });
+      await this.appendSeries(this.store, targetPs.tagsReceivedSeriesId, nextReceived);
     }
   }
 
@@ -633,7 +777,7 @@ export class GameEngine {
     this.lastRespawnAtMonoMsByPlayer.set(playerId, this.clock.now());
 
     const ps = (await this.store.playerSessions.list({ sessionId: session.sessionId, playerId } as any))[0] as any;
-    if (ps) await this.store.series.append(ps.isAliveSeriesId, { t: Date.now(), v: true });
+    if (ps) await this.appendSeries(this.store, ps.isAliveSeriesId, true);
 
     this.events.respawnCompleted(playerId, { respawnId: respawn.respawnId });
   }
@@ -645,6 +789,15 @@ export class GameEngine {
     const station = await this.store.stations.get(stationId);
     const sessionId = (station as any)?.currentSessionId as string | undefined;
     if (!sessionId) return;
+
+    const session = await this.store.sessions.get(sessionId);
+    if (session?.gameDurationMs != null) {
+      const elapsedMs = Date.now() - Date.parse(session.startTimestamp);
+      if (elapsedMs >= session.gameDurationMs) {
+        await this.endSession(stationId);
+        return;
+      }
+    }
 
     const controlPoints = await this.store.controlPoints.list({ stationId } as any);
     for (const cp of controlPoints as QrCtfControlPoint[]) {
@@ -660,7 +813,7 @@ export class GameEngine {
       const hold = this.holdSecondsByTeam.get(ts.teamId) ?? 0;
       const score = total > 0 ? hold / total : 0;
       await this.store.teams.update(ts.teamId, { score });
-      await this.store.series.append(ts.scoreSeriesId, { t: Date.now(), v: score });
+      await this.appendSeries(this.store, ts.scoreSeriesId, score);
     }
   }
 }

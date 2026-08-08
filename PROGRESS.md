@@ -77,7 +77,64 @@ M6/M7 need physical hardware and are out of scope for unattended agent work. **M
 all done** as of this session, with the specific gaps in each listed inline above — none
 of them block a real playtest, but a future session should close them before demo day.
 
-## Current status
+## Current status (2026-08-08 session — GPS, timeseries, capture-visibility)
+
+This session was the first with a human in the loop after real phone testing. Four asks:
+GPS tracking, a timeseries audit, the capture-broadcast bug, and a code review. All landed;
+`pnpm -r build`, `pnpm -r typecheck` and `pnpm -r test` all pass (**100 tests**, up from 58).
+
+**Verified live**, not just by unit test: booted the real Hub against `tools/sim-control-point`,
+drove a full match over real socket.io with two players and a spectator, and confirmed from the
+wire that the capturing player got 16 `capture:progress` events while the bystander got zero.
+
+1. **Capture progress no longer shows on every player's phone.** The routing fix existed in the
+   working tree but had never been committed *or rebuilt* — `dist/` was still running the old
+   `io.emit`. Now: player-room routing, a client-side `playerId` self-filter in `useGame.ts` so a
+   stale server build can't resurrect it, `captureId`-guarded clears (one player finishing a
+   capture used to wipe another's ring), and a `capture:occurred` spectator twin so the ticker
+   survives. Pinned by a test that fails if the routing regresses — verified by reverting it.
+2. **GPS works.** Root cause was `watchPosition` without `enableHighAccuracy` and a 5 s timeout:
+   on an offline AP, network positioning can't reach Apple/Google location services, and a cold
+   GNSS fix takes 15–60 s, so every attempt failed into an empty error handler. Now high-accuracy
+   with a 30–60 s timeout, a real ≥3 s throttle (`maximumAge` was never one), errors surfaced via
+   a GPS status chip, and `locationAccuracyM` persisted. Same fix on both admin one-shot fixes.
+3. **Timeseries recording is complete.** `locationLat`/`locationLong`/`isHumanDetected` were
+   provisioned every session and **never written to once**; `isAlive` only ever recorded `true`.
+   All now record. Confirmed on disk against a real filesystem-store match.
+4. **Two data leaks closed** (found during the review, not asked for): the raw store change feed
+   broadcast every `qrCtfPlayer` row — including `playerSecret` and `qrCodeToken` — to every
+   connected player, and spectators received `capturingPlayerId` via patches that `buildSnapshot`
+   deliberately redacts.
+5. **New:** live spectator map, `/export` (JSON + GeoJSON), and a `/replay` scrubber — the first
+   code anywhere that reads the time series back rather than only appending.
+
+6. **Team colours corrected, roster cut 8 → 6** (owner-approved after testing the proposed values
+   against real hardware). Pink Panthers and Grey Ghosts retired — 50% and 0% saturated
+   respectively, and grey was indistinguishable from the neutral/unowned `#FFFFFF`. The other six
+   are now 100% saturated. **`SEED_TEAMS` is reconciled on every boot** (`reconcileSeedTeams` in
+   `index.ts`) rather than created-if-absent, or an already-seeded Pi would have kept the old list
+   forever; retired teams are deleted and players on them moved back to no-team. Verified by
+   migrating a data dir seeded with the old eight. doc01 §4.4 and doc02's colour table both amended.
+7. **Tag events now name the other player.** `TagEvent` carried only `otherPlayerId`, and players
+   only ever receive their own `qrCtfPlayer` record (HUB-094), so the UI could only say "someone".
+   Name and teamId are now denormalized into the event — never the token or secret on the same row.
+8. **CSV export for Foundry.** `/export/<id>/<table>.csv` across 14 tidy tables, plus
+   `/export/<id>/tables.json` as a manifest (columns, row counts, URLs) for the eventual upload job.
+   Every row carries `sessionId` so successive matches concatenate into one dataset; timestamps are
+   ISO 8601 UTC alongside epoch ms; per-player counters are long-format (`metric`/`value`) so adding
+   a metric appends rows instead of altering a schema; RFC 4180 quoting, CRLF, empty-not-"null".
+
+### Notes for the next session
+
+- **Six teams is a hardware ceiling, not a preference.** A cheap RGB LED gives roughly six
+  distinguishable hues at playing distance. Yellow/Green and Blue/Cyan remain listed in
+  `CONFUSABLE_COLOR_PAIRS` — full saturation improves them but doesn't make them unambiguous.
+- **Testing gotcha worth remembering:** Node's `fetch` keeps sockets alive, so a bare
+  `server.close()` in a test never fires its callback and the run hangs at teardown rather than
+  failing. `exportRoutes.test.ts` has a `closeServer` helper that calls `closeAllConnections()`
+  first; reuse it for any new HTTP test.
+
+## Earlier status
 
 **As of 2026-08-06, all of M0–M5 are complete** and the full workspace (`packages/shared`,
 `apps/hub-server`, `tools/sim-control-point`, `apps/web`) builds, typechecks, and passes

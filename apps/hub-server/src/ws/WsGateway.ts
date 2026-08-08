@@ -138,6 +138,7 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
             profilePicture: null,
             locationLat: null,
             locationLong: null,
+            locationAccuracyM: null,
             playerSecret: randomToken(),
           } as any);
           state.playerId = created.playerId;
@@ -164,7 +165,7 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       const parsed = ScanSchema.safeParse(raw);
       if (!parsed.success) return;
       if (parsed.data.lat !== undefined && parsed.data.long !== undefined) {
-        await store.players.update(state.playerId, { locationLat: parsed.data.lat, locationLong: parsed.data.long });
+        await engine.recordPlayerLocation(state.playerId, parsed.data.lat, parsed.data.long, parsed.data.accuracyM ?? null);
       }
       await engine.handleScan(state.playerId, parsed.data.raw);
     });
@@ -173,7 +174,7 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       if (state.role !== 'player' || !state.playerId) return;
       const parsed = LocationSchema.safeParse(raw);
       if (!parsed.success) return;
-      await store.players.update(state.playerId, { locationLat: parsed.data.lat, locationLong: parsed.data.long });
+      await engine.recordPlayerLocation(state.playerId, parsed.data.lat, parsed.data.long, parsed.data.accuracyM);
     });
 
     socket.on('capture:cancel', async (raw: unknown) => {
@@ -230,7 +231,7 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
 
     socket.on('admin:session:start', async (raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'admin') return;
-      const body = (raw ?? {}) as { sessionName?: string };
+      const body = (raw ?? {}) as { sessionName?: string; gameDurationMs?: number };
       // activeTeamIds is derived, not admin-picked: any team with >=1 player is active.
       // A team with zero players can't meaningfully play, so there's nothing for a
       // checkbox to opt in/out of.
@@ -240,8 +241,12 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
         ack?.({ ok: false, error: 'need_at_least_two_teams_with_players' });
         return;
       }
+      const gameDurationMs =
+        typeof body.gameDurationMs === 'number' && Number.isFinite(body.gameDurationMs) && body.gameDurationMs > 0
+          ? body.gameDurationMs
+          : null;
       try {
-        const session = await engine.startSession(stationId, body.sessionName ?? 'Session', activeTeamIds);
+        const session = await engine.startSession(stationId, body.sessionName ?? 'Session', activeTeamIds, gameDurationMs);
         ack?.({ ok: true, sessionId: session.sessionId });
       } catch (err) {
         ack?.({ ok: false, error: (err as Error).message });
@@ -288,6 +293,33 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
       const record = registry.get(mac);
       if (record) dispatcher.pushSetColor(mac, record.ip, (station as any)?.neutralHexColor ?? '#FFFFFF', 'solid');
       ack?.({ ok: true, controlPointId: cp.controlPointId });
+    });
+
+    // Deletes a claimed Control Point from the station roster - mirrors
+    // admin:respawnLocation:delete/admin:player:remove: unconditional, not a permanent
+    // historical record. Any capture in progress on it is aborted first so the capturing
+    // player's client doesn't end up with a dangling progress ring, and the underlying
+    // Node (if any) is released back to unclaimed so it can be re-claimed later.
+    socket.on('admin:controlPoint:remove', async (raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'admin') return;
+      const body = (raw ?? {}) as { controlPointId?: string };
+      if (!body.controlPointId) {
+        ack?.({ ok: false, error: 'invalid_payload' });
+        return;
+      }
+      const cp = await store.controlPoints.get(body.controlPointId);
+      if (!cp) {
+        ack?.({ ok: false, error: 'not_found' });
+        return;
+      }
+      await engine.abandonCaptureForControlPoint(cp.controlPointId);
+      await store.controlPoints.delete(cp.controlPointId);
+      if (cp.macAddress) {
+        registry.setControlPointId(cp.macAddress, null);
+        const record = registry.get(cp.macAddress);
+        if (record) dispatcher.pushSetColor(cp.macAddress, record.ip, config.unclaimedHexColor, 'solid');
+      }
+      ack?.({ ok: true });
     });
 
     socket.on('admin:respawnLocation:create', async (raw: unknown, ack?: (res: unknown) => void) => {
@@ -400,8 +432,12 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
 
     // HUB-094-style redaction: the public no-auth scoreboard gets name/team/status/stats/
     // photo - never qrCodeToken (would let anyone forge a tag) or playerSecret (identity
-    // theft) or location. profilePicture is already public/no-auth via /attachments
-    // (deviceApp.ts), so no new exposure - just the URL, which is otherwise unguessable.
+    // theft). profilePicture is already public/no-auth via /attachments (deviceApp.ts), so
+    // no new exposure - just the URL, which is otherwise unguessable.
+    //
+    // Location is the one deliberate exception, and only when config.spectatorShowPositions
+    // is on - it powers the live map. See that flag's doc comment for the fairness caveat:
+    // this scoreboard is unauthenticated, so players can read opponents' positions from it.
     socket.on('spectator:players:list', async (_raw: unknown, ack?: (res: unknown) => void) => {
       if (state.role !== 'spectator') return;
       const players = await store.players.list({ stationId } as any);
@@ -415,10 +451,29 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
           playerStatus: p.playerStatus,
           profilePicture: p.profilePicture,
           isConnected: (connectedSocketIdsByPlayerId.get(p.playerId)?.size ?? 0) > 0,
+          ...(config.spectatorShowPositions
+            ? { locationLat: p.locationLat, locationLong: p.locationLong, locationAccuracyM: p.locationAccuracyM ?? null }
+            : {}),
           ...(await getPlayerStats(p.playerId, sessionId)),
         })),
       );
-      ack?.({ ok: true, players: roster });
+      ack?.({ ok: true, players: roster, showPositions: config.spectatorShowPositions });
+    });
+
+    // Coordinates only - allowedTeamIds is a gameplay detail the public board has no reason
+    // to expose. Respawn points aren't part of state:snapshot, but the map needs them as
+    // fixed reference geometry alongside the control points.
+    socket.on('spectator:respawnLocations:list', async (_raw: unknown, ack?: (res: unknown) => void) => {
+      if (state.role !== 'spectator') return;
+      const locations = await store.respawnLocations.list({ stationId } as any);
+      ack?.({
+        ok: true,
+        respawnLocations: (locations as any[]).map((l) => ({
+          respawnLocationId: l.respawnLocationId,
+          locationLat: l.locationLat,
+          locationLong: l.locationLong,
+        })),
+      });
     });
 
     socket.on('admin:node:identify', async (raw: unknown, ack?: (res: unknown) => void) => {
@@ -435,13 +490,28 @@ export function createWsGateway(deps: WsGatewayDeps): () => void {
   const SPECTATOR_VISIBLE_TYPES = new Set(['qrCtfTeam', 'qrCtfControlPoint', 'qrCtfSession']);
   const unsubscribe = store.subscribe((e) => {
     if (e.kind === 'appended') return; // series points aren't part of the object patch stream
-    const patch = {
-      type: e.type,
-      id: e.id,
-      patch: e.kind === 'deleted' ? null : e.kind === 'created' ? e.after : (e as any).patch,
-    };
+    const body = e.kind === 'deleted' ? null : e.kind === 'created' ? e.after : (e as any).patch;
+    const patch = { type: e.type, id: e.id, patch: body };
+
+    // HUB-094: a qrCtfPlayer row carries playerSecret (resume-by-secret identity takeover)
+    // and qrCodeToken (lets anyone forge a tag against that player). Broadcasting the raw
+    // change feed to every socket put both on the wire for every other player to read, so
+    // player patches go only to that player's own room plus admins. Everything else
+    // (teams, control points, session) is public game state and still broadcasts.
+    if (e.type === 'qrCtfPlayer') {
+      io.to(`player:${e.id}`).emit('state:patch', patch);
+      io.to('admins').emit('state:patch', patch);
+      return;
+    }
+
     if (SPECTATOR_VISIBLE_TYPES.has(e.type)) {
-      io.to('spectators').emit('state:patch', patch);
+      // Same redaction buildSnapshot applies for spectators (snapshot.ts) - the patch stream
+      // was leaking capturingPlayerId that the snapshot deliberately strips.
+      const spectatorPatch =
+        e.type === 'qrCtfControlPoint' && body && typeof body === 'object' && 'capturingPlayerId' in body
+          ? { ...patch, patch: { ...(body as object), capturingPlayerId: null } }
+          : patch;
+      io.to('spectators').emit('state:patch', spectatorPatch);
     }
     io.except('spectators').emit('state:patch', patch);
   });

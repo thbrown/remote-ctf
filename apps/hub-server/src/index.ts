@@ -31,6 +31,47 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const CAPTURE_TICK_MS = 200; // 5 Hz, HUB-103
 const SCORING_TICK_MS = 1000; // 1 Hz, HUB-131
 
+/**
+ * HUB-044: bring the persisted team roster in line with SEED_TEAMS.
+ *
+ * This used to be create-if-absent only, which silently meant a data directory seeded by an
+ * earlier build kept its old team list forever — so the 2026-08-08 color correction and team
+ * reduction would never have reached an existing Pi. Teams are a fixed, code-owned list
+ * (HUB-045: no team CRUD in the Admin UI), so treating SEED_TEAMS as the source of truth and
+ * reconciling on boot is the honest reading of "idempotent upsert".
+ *
+ * Scores and tag totals are never touched — only identity fields (name/color).
+ */
+async function reconcileSeedTeams(store: GameStateStore) {
+  const seededIds = new Set(SEED_TEAMS.map((t) => t.teamId));
+
+  for (const team of SEED_TEAMS) {
+    const existing = await store.teams.get(team.teamId);
+    if (!existing) {
+      await store.teams.create({ ...team, score: 0, totalTagsInflicted: 0, totalTagsReceived: 0 });
+    } else if (existing.hexColor !== team.hexColor || existing.teamName !== team.teamName) {
+      console.log(`[hub] team ${team.teamName}: ${existing.hexColor} -> ${team.hexColor}`);
+      await store.teams.update(team.teamId, { teamName: team.teamName, hexColor: team.hexColor });
+    }
+  }
+
+  // Teams removed from SEED_TEAMS. Their historical rows (tags, teamSessions) key teamId as
+  // plain data rather than a live foreign key — same rationale as admin:player:remove — so
+  // deleting the team record leaves past sessions intact. Players still sitting on a retired
+  // team would otherwise be stuck on a team that no longer exists, unable to be scored, so
+  // they're moved back to "no team" and will be asked to pick again on their next load.
+  for (const existing of (await store.teams.list()) as { teamId: string; teamName: string }[]) {
+    if (seededIds.has(existing.teamId)) continue;
+    const orphaned = await store.players.list({ teamId: existing.teamId } as any);
+    for (const p of orphaned as { playerId: string; playerName: string }[]) {
+      console.warn(`[hub] player ${p.playerName} was on retired team ${existing.teamName} - clearing their team`);
+      await store.players.update(p.playerId, { teamId: null });
+    }
+    console.log(`[hub] retiring team ${existing.teamName} (no longer in SEED_TEAMS)`);
+    await store.teams.delete(existing.teamId);
+  }
+}
+
 async function ensureStation(store: GameStateStore, config: Awaited<ReturnType<typeof loadConfig>>) {
   const existing = await store.stations.get(config.stationId);
   if (existing) return existing;
@@ -53,13 +94,7 @@ async function main() {
   const store: GameStateStore = config.storeDriver === 'filesystem' ? new FileSystemStore(config.dataDir) : new InMemoryStore();
   await store.init();
 
-  for (const team of SEED_TEAMS) {
-    // HUB-044: idempotent upsert by teamId.
-    const existing = await store.teams.get(team.teamId);
-    if (!existing) {
-      await store.teams.create({ ...team, score: 0, totalTagsInflicted: 0, totalTagsReceived: 0 });
-    }
-  }
+  await reconcileSeedTeams(store);
   await ensureStation(store, config);
 
   const registry = new NodeRegistry(config.heartbeatIntervalMs);
@@ -70,7 +105,7 @@ async function main() {
   await new Promise<void>((resolve) => nodeApp.listen(config.nodeHttpPort, resolve));
   console.log(`[hub] nodeApp listening on :${config.nodeHttpPort}`);
 
-  const spectatorApp = createSpectatorApp(config);
+  const spectatorApp = createSpectatorApp(config, store);
   const spectatorServer = createHttpServer(spectatorApp);
   await new Promise<void>((resolve) => spectatorServer.listen(config.spectatorHttpPort, resolve));
   console.log(`[hub] spectatorApp listening on :${config.spectatorHttpPort}`);

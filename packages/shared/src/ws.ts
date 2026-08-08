@@ -94,6 +94,7 @@ export interface CaptureStartedEvent {
 
 export interface CaptureProgressEvent {
   captureId: string;
+  playerId: string;
   progress: number; // 0..1
   isHumanDetected: boolean;
 }
@@ -106,12 +107,33 @@ export interface CaptureCompletedEvent {
 
 export interface CaptureAbandonedEvent {
   captureId: string;
+  /** Who was capturing. Broadcast to everyone (control point state is public), so receivers
+   * need this to tell "my attempt ended" from "somebody else's did". */
+  playerId: string;
   abandonReason: AbandonReason;
+}
+
+/** Public, PII-light twin of CaptureStartedEvent, delivered to the spectators room only.
+ * capture:started itself is scoped to the capturing player's room (only they should see a
+ * progress ring), which would otherwise leave the scoreboard ticker with no way to announce
+ * "X started capturing Y" at all - same split as TagEvent/TagOccurredEvent below. */
+export interface CaptureOccurredEvent {
+  captureId: string;
+  controlPointId: string;
+  playerId: string;
 }
 
 export interface TagEvent {
   tagId: string;
   otherPlayerId: string;
+  /** The other player's display name, denormalized into the event on purpose. Players only
+   * ever receive their OWN qrCtfPlayer record (HUB-094), so a bare otherPlayerId is
+   * unresolvable client-side and the UI can only say "someone". A display name is the
+   * minimum needed to say who — never the token or secret that sit on the same record. */
+  otherPlayerName: string;
+  /** Which team they're on — in a CTF "who tagged me" is mostly a question about which team
+   * is nearby, and the client can resolve this against the team list it already has. */
+  otherTeamId: string | null;
 }
 
 /** Public, PII-light broadcast to the spectators room only - unlike TagEvent (delivered
